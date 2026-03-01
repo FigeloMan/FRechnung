@@ -1,5 +1,5 @@
 """
-FRechnung — Hauptanwendung v4.1  (Flask + pywebview)
+FRechnung — Hauptanwendung v4.2  (Flask + pywebview)
 
 Sicherheit:
   - Flask lauscht NUR auf 127.0.0.1 (kein Netzwerkzugriff möglich)
@@ -32,6 +32,7 @@ def resource_path(relative_path: str) -> str:
 
 sys.path.insert(0, resource_path("."))
 
+import server as server_module          # ← Modul-Referenz für APP_PORT
 from server import app as flask_app
 
 
@@ -160,6 +161,11 @@ def wait_for_flask(port: int, timeout: int = 15) -> bool:
 # ──────────────────────────────────────────────
 def main() -> None:
     port = find_free_port()
+
+    # Port ins server-Modul schreiben BEVOR Flask startet.
+    # Die Index-Route ersetzt __APP_PORT__ im HTML → Frontend
+    # kennt immer den richtigen Port, egal welcher zufällig gewählt wurde.
+    server_module.APP_PORT = port
 
     t = threading.Thread(target=start_flask, args=(port,), daemon=True)
     t.start()

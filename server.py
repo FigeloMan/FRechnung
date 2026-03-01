@@ -15,12 +15,9 @@ from pdf_generator import create_invoice_pdf, THEME_NAMES
 
 # ── Ressourcenpfad (PyInstaller-kompatibel) ───────────────────────────────────
 def resource_path(relative_path):
-    """Absoluter Pfad – funktioniert sowohl normal als auch als gebündelte .exe"""
     if hasattr(sys, "_MEIPASS"):
-        # PyInstaller entpackt nach _MEIPASS
         base = sys._MEIPASS
     else:
-        # Normaler Betrieb: Verzeichnis dieser Datei (server.py)
         base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, relative_path)
 
@@ -31,11 +28,23 @@ CORS(app)
 
 config_manager = ConfigManager()
 
+# Wird von main.py gesetzt, bevor der Server startet
+APP_PORT: int = 5757
 
-# ── Frontend ─────────────────────────────────────────────────────────────────
+
+# ── Frontend ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    return send_from_directory(FRONTEND_DIR, "index.html")
+    """
+    Liest index.html und ersetzt den Platzhalter __APP_PORT__ mit dem
+    tatsächlichen Port. So kennt das Frontend immer die richtige API-URL,
+    auch wenn main.py einen zufälligen Port gewählt hat.
+    """
+    html_path = os.path.join(FRONTEND_DIR, "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace("__APP_PORT__", str(APP_PORT))
+    return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 @app.route("/favicon.ico")
 def favicon():
@@ -78,7 +87,6 @@ def upload_logo():
     b64  = data.get("data", "")
     name = data.get("name", "logo.png")
     try:
-        # Speichern neben der exe / im AppData-Ordner
         save_dir = os.path.join(os.path.expanduser("~"), "FRechnung")
         os.makedirs(save_dir, exist_ok=True)
         path = os.path.join(save_dir, name)
