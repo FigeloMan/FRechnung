@@ -10,7 +10,6 @@
 **FRechnung** ist eine Desktop-Anwendung zur einfachen und professionellen Erstellung von Rechnungen als PDF. Die generierten PDFs enthalten eingebettetes maschinenlesbares XML nach dem **ZUGFeRD 2.2 / Factur-X Basic**-Standard, vollständig konform zur europäischen Norm **EN 16931**.
 
 ### Highlights
-- **Offizielle Seite:** [frechnung.de](https://frechnung.de)
 - **Elegante PDF-Rechnungen** in 8 wählbaren Design-Themen.
 - **EN 16931 konformes XML** eingebettet (ZUGFeRD 2.2 / Factur-X Basic).
 - **B2C-, B2B- und B2G-Modus** — passgenaue Felder je nach Rechnungsart.
