@@ -57,7 +57,7 @@ pyinstaller invoice_master.spec
 
 Die fertige `.exe` liegt danach unter:
 ```
-dist/InvoiceMaster.exe
+dist/FRechnung.exe
 ```
 
 > **Erste Starten dauert ~5–10 Sekunden** (PyInstaller entpackt in Temp-Ordner).
