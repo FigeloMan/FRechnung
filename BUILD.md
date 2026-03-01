@@ -6,7 +6,7 @@
 FRechnung/
 ├── main.py                  ← NEU: ersetzt alten CTk-main.py
 ├── server.py                ← NEU: Flask REST-API
-├── invoice_master.spec      ← NEU: PyInstaller-Konfiguration
+├── FRechnung.spec      ← NEU: PyInstaller-Konfiguration
 ├── requirements.txt         ← NEU: Abhängigkeiten
 ├── frontend/
 │   └── index.html           ← NEU: React-UI (kein Build-Step nötig)
@@ -52,7 +52,7 @@ python server.py    # Flask direkt starten
 ## Schritt 3 — .exe bauen
 
 ```bash
-pyinstaller invoice_master.spec
+pyinstaller FRechnung.spec
 ```
 
 Die fertige `.exe` liegt danach unter:
