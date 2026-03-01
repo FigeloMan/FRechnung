@@ -1,0 +1,11 @@
+# FRechnung — Abhängigkeiten
+# Installation: pip install -r requirements.txt
+
+flask>=3.0.0
+flask-cors>=4.0.0
+pywebview>=4.4.1
+pyinstaller>=6.0.0
+
+# PDF-Generierung (bereits in deinem Projekt vorhanden)
+reportlab>=4.0.0
+Pillow>=10.0.0

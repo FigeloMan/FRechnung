@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FRechnung</title>
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+
+  <!-- React via CDN – kein Build-Step nötig -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel für JSX im Browser -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0a0a0f;
+      color: #e8eaf0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      min-height: 100vh;
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+    @keyframes fadeSlideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: none; }
+    }
+    @keyframes pulse-glow {
+      0%,100% { box-shadow: 0 6px 24px rgba(99,102,241,0.35); }
+      50%      { box-shadow: 0 6px 36px rgba(99,102,241,0.6); }
+    }
+    .btn-primary {
+      background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 6px 24px rgba(99,102,241,0.35);
+    }
+    .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 8px 28px rgba(99,102,241,0.5); }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-secondary {
+      background: rgba(255,255,255,0.05);
+      color: #8090a8;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+    }
+    .btn-secondary:hover { background: rgba(255,255,255,0.08); color: #c0c8d8; }
+
+    input, textarea, select {
+      width: 100%;
+      padding: 8px 11px;
+      border-radius: 7px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.09);
+      color: #e0e4ec;
+      font-family: inherit;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    input:focus, textarea:focus, select:focus {
+      border-color: rgba(99,102,241,0.6);
+      background: rgba(255,255,255,0.07);
+    }
+    textarea { resize: vertical; }
+    select option { background: #1a1f2e; }
+
+    .field-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #4a5468;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      display: block;
+    }
+    .field-wrap { margin-bottom: 10px; }
+
+    .card {
+      background: linear-gradient(135deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.02) 100%);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 14px;
+      padding: 20px;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.25);
+    }
+    .card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      font-size: 12px;
+      font-weight: 700;
+      color: #c0c8dc;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .tag-b2b {
+      display: inline-block;
+      background: rgba(59,130,246,0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59,130,246,0.3);
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      letter-spacing: 0.08em;
+    }
+    .tag-b2g {
+      display: inline-block;
+      background: rgba(126,200,227,0.12);
+      color: #7ec8e3;
+      border: 1px solid rgba(126,200,227,0.3);
+      border-radius: 5px;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      letter-spacing: 0.08em;
+    }
+
+    .b2g-block {
+      background: linear-gradient(135deg, rgba(14,30,48,0.95), rgba(10,22,40,0.95));
+      border: 1.5px solid rgba(126,200,227,0.35);
+      border-radius: 12px;
+      padding: 14px;
+      box-shadow: 0 0 24px rgba(126,200,227,0.06), inset 0 0 30px rgba(126,200,227,0.02);
+      animation: fadeSlideIn 0.25s ease;
+    }
+
+    .items-table-header {
+      display: grid;
+      grid-template-columns: 30px 1fr 80px 60px 110px 110px 36px;
+      gap: 8px;
+      padding: 8px 14px;
+      background: rgba(59,130,246,0.08);
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 10px;
+      font-weight: 700;
+      color: #5a6880;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    .items-table-row {
+      display: grid;
+      grid-template-columns: 30px 1fr 80px 60px 110px 110px 36px;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+      font-size: 13px;
+      align-items: center;
+      animation: fadeSlideIn 0.25s ease;
+    }
+    .items-table-row:nth-child(even) { background: rgba(255,255,255,0.02); }
+
+    .toast {
+      position: fixed;
+      bottom: 28px;
+      right: 28px;
+      padding: 12px 20px;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      z-index: 9999;
+      animation: fadeSlideIn 0.3s ease;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    }
+    .toast-success { background: rgba(22,163,74,0.9); color: #fff; border: 1px solid rgba(34,197,94,0.4); }
+    .toast-error   { background: rgba(185,28,28,0.9); color: #fff; border: 1px solid rgba(239,68,68,0.4); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef, useCallback } = React;
+
+    const API = "http://127.0.0.1:5757/api";
+    const fmt = (n) => typeof n === "number"
+      ? n.toLocaleString("de-DE", { minimumFractionDigits:2, maximumFractionDigits:2 }) + " €"
+      : "—";
+    const today = new Date().toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"});
+
+    const THEME_DESC = {
+      "Klassisch Blau":  "Farbiger Kopf · alternierende Zeilen · klassisch",
+      "Modern Minimal":  "Nur Linien · keine Füllung · viel Weißraum",
+      "Bold Dunkel":     "Schwarzes Band · Goldakzent · voller Totalbalken",
+      "Elegant Grün":    "Linker 3mm-Balken je Zeile · Zebra-Muster",
+      "Corporate Grau":  "Außenrahmen · gestrichelte Trennlinien · sachlich",
+      "Sunset Orange":   "Warmton · breite Beschreibung · Akzenttrennlinien",
+      "Premium Navy":    "Navy-Band · Gold-Linie · durchgehender Links-Balken",
+      "Bauunternehmen":  "Doppelband-Kopf · Nummernbadge · Orange",
+    };
+
+    // ── Toast ──────────────────────────────────────────────────────────────
+    function Toast({ msg, type, onDone }) {
+      useEffect(() => { const t = setTimeout(onDone, 3200); return () => clearTimeout(t); }, []);
+      return <div className={`toast toast-${type}`}>{msg}</div>;
+    }
+
+    // ── Field ──────────────────────────────────────────────────────────────
+    function Field({ label, id, placeholder, defaultValue, type, rows=2, accent, value, onChange, required }) {
+      const accentColor = accent || "rgba(99,102,241,0.6)";
+      const style = { width:"100%" };
+      const isControlled = value !== undefined;  // kontrolliert wenn value übergeben
+      const handlers = {
+        onChange: onChange ? e => onChange(e.target.value) : undefined,
+        onFocus:  e => { e.target.style.borderColor = accentColor; e.target.style.background = "rgba(255,255,255,0.07)"; },
+        onBlur:   e => { e.target.style.borderColor = accent ? accent+"44" : "rgba(255,255,255,0.09)"; e.target.style.background = "rgba(255,255,255,0.05)"; },
+      };
+      if (accent) style.borderColor = accent + "44";
+
+      // Kontrolliert (value+onChange) ODER unkontrolliert (defaultValue) — niemals beides
+      const inputProps = isControlled
+        ? { value, ...handlers }
+        : { defaultValue, ...handlers };
+
+      return (
+        <div className="field-wrap">
+          {label && <label className="field-label" style={accent ? {color: accent} : {}}>{label}{required && <span style={{color:"#f87171"}}> *</span>}</label>}
+          {type === "textarea"
+            ? <textarea id={id} rows={rows} placeholder={placeholder} style={style} {...inputProps} />
+            : <input id={id} type="text" placeholder={placeholder} style={style} {...inputProps} />
+          }
+        </div>
+      );
+    }
+
+    // ── Card ──────────────────────────────────────────────────────────────
+    function Card({ title, icon, children, style: extraStyle }) {
+      return (
+        <div className="card" style={extraStyle}>
+          <div className="card-title"><span>{icon}</span><span>{title}</span></div>
+          {children}
+        </div>
+      );
+    }
+
+    // ── Main App ──────────────────────────────────────────────────────────
+    function App() {
+      const [tab,      setTab]      = useState("invoice");
+      const [mode,     setMode]     = useState("B2C");
+      const [items,    setItems]    = useState([]);
+      const [themes,   setThemes]   = useState(Object.keys(THEME_DESC));
+      const [theme,    setTheme]    = useState("Klassisch Blau");
+      const [totals,   setTotals]   = useState(null);
+      const [pdfB64,   setPdfB64]   = useState(null);
+      const [loading,  setLoading]  = useState(false);
+      const [toast,    setToast]    = useState(null);
+      const [provider, setProvider] = useState({});
+      const [newItem,  setNewItem]  = useState({ name:"", qty:"1", unit:"Stk.", price:"" });
+
+      const showToast = (msg, type="success") => setToast({ msg, type, key: Date.now() });
+
+      // Collect form values by id
+      const val = id => document.getElementById(id)?.value?.trim() || "";
+
+      // Controlled state für Provider-Felder
+      const [provFields, setProvFields] = useState({
+        company_name:"", owner:"", contact_person:"", phone:"", email:"",
+        address:"", tax_id:"", creditor_reference:"", bank:"", bank_account:"", bank_bic:""
+      });
+
+      useEffect(() => {
+        fetch(`${API}/themes`).then(r=>r.json()).then(setThemes).catch(()=>{});
+        fetch(`${API}/provider`).then(r=>r.json()).then(d => {
+          setProvider(d);
+          // Direkt als State setzen → kein getElementById nötig
+          setProvFields({
+            company_name:       d.company_name       || "",
+            owner:              d.owner              || "",
+            contact_person:     d.contact_person     || "",
+            phone:              d.phone              || "",
+            email:              d.email              || "",
+            address:            d.address            || "",
+            tax_id:             d.tax_id             || "",
+            creditor_reference: d.creditor_reference || "",
+            bank:               d.bank               || "",
+            bank_account:       d.bank_account       || "",
+            bank_bic:           d.bank_bic           || "",
+          });
+        }).catch(()=>{});
+      }, []);
+
+      const setPF = (key) => (val) => setProvFields(p => ({...p, [key]: val}));
+
+      // ── Items ──────────────────────────────────────────────────────────
+      const addItem = () => {
+        const qty   = parseFloat(newItem.qty);
+        const price = parseFloat(newItem.price.replace(",","."));
+        if (!newItem.name || isNaN(qty) || isNaN(price) || qty <= 0 || price < 0) {
+          showToast("Ungültige Eingabe – bitte Bezeichnung, Menge und Preis prüfen.", "error");
+          return;
+        }
+        setItems(p => [...p, { id: Date.now(), name: newItem.name, qty, unit: newItem.unit, price, total: qty * price }]);
+        setNewItem({ name:"", qty:"1", unit:"Stk.", price:"" });
+      };
+
+      // ── Berechnen ──────────────────────────────────────────────────────
+      const calc = () => {
+        if (!items.length) { showToast("Bitte erst Artikel hinzufügen.", "error"); return null; }
+        const raw  = items.reduce((s, i) => s + i.total, 0);
+        const disc = parseFloat(val("discount") || "0") || 0;
+        const tax  = parseFloat(val("taxrate")  || "19") || 19;
+        const da   = raw * (disc / 100);
+        const sub  = raw - da;
+        const taxA = sub * (tax / 100);
+        const total = sub + taxA;
+        const t = { raw, da, sub, taxA, total, disc, tax };
+        setTotals(t);
+        return t;
+      };
+
+      // ── PDF generieren ─────────────────────────────────────────────────
+      const generatePdf = async () => {
+        if (!items.length) { showToast("Keine Artikel vorhanden.", "error"); return; }
+        if (!val("customer_name")) { showToast("Kundenname fehlt.", "error"); return; }
+        if (!val("invoice_number")) { showToast("Rechnungsnummer fehlt.", "error"); return; }
+        if (mode === "B2G" && !val("leitweg_id")) { showToast("Leitweg-ID ist Pflicht bei B2G.", "error"); return; }
+
+        const t = calc();
+        if (!t) return;
+
+        const days = parseInt(val("payment_days") || "14");
+        let due = "";
+        try {
+          const [d,m,y] = val("invoice_date").split(".");
+          const dt = new Date(+y, +m-1, +d);
+          dt.setDate(dt.getDate() + days);
+          due = dt.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit",year:"numeric"});
+        } catch {}
+
+        const payload = {
+          invoice: {
+            invoice_number:        val("invoice_number"),
+            invoice_date:          val("invoice_date")       || today,
+            delivery_date:         val("delivery_date")      || today,
+            due_date:              due,
+            subtotal:              t.sub,
+            tax_rate:              t.tax,
+            tax_amount:            t.taxA,
+            total:                 t.total,
+            discount_percent:      t.disc,
+            discount_amount:       t.da,
+            purchase_order_number: val("purchase_order"),
+            buyer_reference:       val("buyer_reference"),
+            payment_terms:         val("payment_terms"),
+            notes:                 val("notes"),
+          },
+          receiver: {
+            customer_name:     val("customer_name"),
+            customer_address:  val("customer_address"),
+            customer_number:   mode !== "B2C" ? val("customer_number") : "",
+            customer_vat:      mode !== "B2C" ? val("customer_vat")    : "",
+            Object:            val("object_field"),
+            aus:               val("aus_field"),
+            leistungszeitraum: val("leistungszeitraum"),
+            leitweg_id:        mode === "B2G" ? val("leitweg_id")    : "",
+            contract_ref:      mode === "B2G" ? val("contract_ref")  : "",
+            cost_center:       mode === "B2G" ? val("cost_center")   : "",
+          },
+          items: items.map(i => ({
+            product_name: i.name, quantity: i.qty, unit_price: i.price,
+            total_price: i.total, unit: i.unit, unit_code: "C62"
+          })),
+          company: provider,
+          theme,
+        };
+
+        setLoading(true);
+        try {
+          const res  = await fetch(`${API}/generate-pdf`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            setPdfB64(data.pdf_base64);
+            showToast("✅ PDF erfolgreich generiert!");
+          } else {
+            showToast("Fehler: " + data.error, "error");
+          }
+        } catch (e) {
+          showToast("Verbindungsfehler: " + e.message, "error");
+        }
+        setLoading(false);
+      };
+
+      // ── PDF speichern ──────────────────────────────────────────────────
+      const savePdf = async () => {
+        if (!pdfB64) { showToast("Zuerst PDF generieren.", "error"); return; }
+        const invNum = val("invoice_number") || "Rechnung";
+        const defaultName = `Rechnung_${invNum}.pdf`;
+
+        // Nativer Windows-Dialog über pywebview API
+        if (window.pywebview && window.pywebview.api) {
+          const data = await window.pywebview.api.save_pdf_dialog(pdfB64, defaultName);
+          if (data.cancelled) return;
+          if (data.ok) showToast(`💾 Gespeichert: ${data.path}`);
+          else showToast("Speichern fehlgeschlagen: " + data.error, "error");
+        } else {
+          // Fallback für Browser-Test: direkter Download
+          const blob = new Blob([Uint8Array.from(atob(pdfB64), c => c.charCodeAt(0))], {type:"application/pdf"});
+          const a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = defaultName;
+          a.click();
+          showToast("💾 Download gestartet.");
+        }
+      };
+
+      // ── PDF Vorschau ───────────────────────────────────────────────────
+      const previewPdf = async () => {
+        if (!pdfB64) { showToast("Zuerst PDF generieren.", "error"); return; }
+        const invNum = val("invoice_number") || "Vorschau";
+
+        if (window.pywebview && window.pywebview.api) {
+          // Nativer PDF-Viewer via Python (Adobe, Edge, Foxit, etc.)
+          const data = await window.pywebview.api.preview_pdf(pdfB64, `Vorschau_${invNum}.pdf`);
+          if (!data.ok) showToast("Vorschau fehlgeschlagen: " + data.error, "error");
+        } else {
+          // Fallback im Browser-Test
+          const blob = new Blob([Uint8Array.from(atob(pdfB64), c => c.charCodeAt(0))], {type:"application/pdf"});
+          window.open(URL.createObjectURL(blob), "_blank");
+        }
+      };
+
+      // ── Logo Upload ────────────────────────────────────────────────────
+      const uploadLogo = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          const b64 = ev.target.result.split(",")[1];
+          const res = await fetch(`${API}/provider/logo/upload`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({ data: b64, name: file.name }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            setProvider(p => ({ ...p, logo_path: data.path }));
+            showToast("Logo gespeichert: " + file.name);
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+
+      // ── Provider speichern ─────────────────────────────────────────────
+      const saveProvider = async () => {
+        const d = { ...provFields, logo_path: provider.logo_path || "" };
+        try {
+          const res  = await fetch(`${API}/provider`, {
+            method:"POST", headers:{"Content-Type":"application/json"},
+            body: JSON.stringify(d),
+          });
+          const data = await res.json();
+          if (data.ok) { setProvider(d); showToast("✅ Einstellungen gespeichert!"); }
+          else showToast("Fehler: " + data.error, "error");
+        } catch (e) {
+          showToast("Verbindungsfehler.", "error");
+        }
+      };
+
+      // ── Background decorations ─────────────────────────────────────────
+      const bgStyle = {
+        position:"fixed", inset:0, pointerEvents:"none", zIndex:0,
+        background:`radial-gradient(ellipse 80% 50% at 15% 10%, rgba(59,130,246,0.07) 0%, transparent 60%),
+                    radial-gradient(ellipse 60% 40% at 85% 85%, rgba(99,102,241,0.05) 0%, transparent 60%)`,
+      };
+      const gridStyle = {
+        position:"fixed", inset:0, pointerEvents:"none", zIndex:0,
+        backgroundImage:`linear-gradient(rgba(255,255,255,0.016) 1px, transparent 1px),
+                         linear-gradient(90deg, rgba(255,255,255,0.016) 1px, transparent 1px)`,
+        backgroundSize:"60px 60px",
+      };
+
+      return (
+        <div style={{ minHeight:"100vh", position:"relative" }}>
+          <div style={bgStyle} />
+          <div style={gridStyle} />
+
+          <div style={{ maxWidth:1100, margin:"0 auto", padding:"0 24px 60px", position:"relative", zIndex:1 }}>
+
+            {/* HEADER */}
+            <div style={{ padding:"32px 0 24px", display:"flex", alignItems:"center", gap:16 }}>
+              <div style={{
+                width:44, height:44, borderRadius:12,
+                background:"linear-gradient(135deg,#3b82f6,#6366f1)",
+                display:"flex", alignItems:"center", justifyContent:"center",
+                fontSize:22, flexShrink:0, boxShadow:"0 0 24px rgba(99,102,241,0.4)",
+              }}>📄</div>
+              <div>
+                <div style={{ fontSize:24, fontWeight:800, letterSpacing:"-0.5px" }}>FRechnung</div>
+                <div style={{ fontSize:11, color:"#3a4050", letterSpacing:"0.12em", textTransform:"uppercase", marginTop:2 }}>
+                  Rechnungserstellung · v1.0
+                </div>
+              </div>
+              <div style={{ marginLeft:"auto", display:"flex", gap:8 }}>
+                {[["invoice","Rechnungsdaten"],["provider","Dienstleister"]].map(([t,l]) => (
+                  <button key={t} onClick={() => setTab(t)} style={{
+                    padding:"8px 20px", borderRadius:8, border:"none", cursor:"pointer",
+                    fontFamily:"inherit", fontSize:13, fontWeight:600,
+                    background: tab===t ? "linear-gradient(135deg,#3b82f6,#6366f1)" : "rgba(255,255,255,0.05)",
+                    color: tab===t ? "#fff" : "#7a8090",
+                    boxShadow: tab===t ? "0 4px 16px rgba(99,102,241,0.3)" : "none",
+                    transition:"all 0.2s",
+                  }}>{l}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* ── INVOICE TAB ── */}
+            {tab === "invoice" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+
+                {/* Mode */}
+                <Card title="Rechnungsart" icon="⚡">
+                  <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                    {[
+                      {val:"B2C",label:"B2C",sub:"Privatperson",color:"#22c55e"},
+                      {val:"B2B",label:"B2B",sub:"Unternehmen",color:"#3b82f6"},
+                      {val:"B2G",label:"B2G",sub:"Behörde / öffentl. Auftraggeber",color:"#7ec8e3"},
+                    ].map(({val:v,label,sub,color}) => (
+                      <button key={v} onClick={() => setMode(v)} style={{
+                        padding:"12px 22px", borderRadius:10, cursor:"pointer",
+                        border:`1.5px solid ${mode===v ? color : "rgba(255,255,255,0.08)"}`,
+                        fontFamily:"inherit",
+                        background: mode===v ? `rgba(${v==="B2G"?"126,200,227":v==="B2B"?"59,130,246":"34,197,94"},0.1)` : "rgba(255,255,255,0.03)",
+                        boxShadow: mode===v ? `0 0 18px ${color}22` : "none",
+                        display:"flex", flexDirection:"column", alignItems:"flex-start",
+                        transition:"all 0.2s",
+                      }}>
+                        <span style={{ fontWeight:800, fontSize:15, color: mode===v ? color : "#aaa" }}>{label}</span>
+                        <span style={{ fontSize:11, color:"#5a6070", marginTop:2 }}>{sub}</span>
+                      </button>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* Two-column grid */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+
+                  {/* Kundendaten */}
+                  <Card title="Kundendaten" icon="👤">
+                    <Field label="Name / Firmenname" id="customer_name" placeholder="Max Mustermann GmbH" required />
+                    <Field label="Anschrift" id="customer_address" placeholder={"Musterstraße 1\n12345 Berlin"} type="textarea" rows={2} />
+                    <Field label="Objekt / Bauvorhaben" id="object_field" placeholder="z.B. Sanierung EG" />
+                    <Field label="Ausführung" id="aus_field" placeholder="z.B. 01.01.–28.02.2025" />
+                    <Field label="Leistungszeitraum" id="leistungszeitraum" placeholder="01.01.–31.01.2025" />
+
+                    {/* B2B fields */}
+                    {(mode === "B2B" || mode === "B2G") && (
+                      <div style={{ marginTop:12, borderTop:"1px solid rgba(59,130,246,0.2)", paddingTop:12, animation:"fadeSlideIn 0.2s ease" }}>
+                        <div style={{ marginBottom:10 }}><span className="tag-b2b">B2B-Felder</span></div>
+                        <Field label="Kundennummer" id="customer_number" placeholder="KD-00123" />
+                        <Field label="USt-ID des Kunden" id="customer_vat" placeholder="DE123456789" />
+                      </div>
+                    )}
+
+                    {/* B2G fields */}
+                    {mode === "B2G" && (
+                      <div style={{ marginTop:12 }}>
+                        <div className="b2g-block">
+                          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:12 }}>
+                            <span style={{ fontSize:14 }}>🏛️</span>
+                            <span className="tag-b2g">B2G — E-Rechnung / Öffentl. Auftraggeber</span>
+                          </div>
+                          <Field label="Leitweg-ID" id="leitweg_id" placeholder="991-1234567890-06" required accent="#7ec8e3" />
+                          <Field label="Vertragsnummer / Auftragsnummer" id="contract_ref" placeholder="VTR-2025-001" accent="#7ec8e3" />
+                          <Field label="Kostenstelle / Haushaltsstelle" id="cost_center" placeholder="4200-001" accent="#7ec8e3" />
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Rechnungsinfos */}
+                  <Card title="Rechnungsinformationen" icon="📋">
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                      <Field label="Rechnungsnummer" id="invoice_number" placeholder="RE-2025-0001" required />
+                      <Field label="Rechnungsdatum" id="invoice_date" defaultValue={today} />
+                      <Field label="Lieferdatum" id="delivery_date" defaultValue={today} />
+                      <Field label="USt.-Satz %" id="taxrate" defaultValue="19" />
+                      <Field label="Rabatt %" id="discount" defaultValue="0" />
+                      <Field label="Zahlungsziel (Tage)" id="payment_days" defaultValue="14" />
+                      <Field label="Bestellnummer (opt.)" id="purchase_order" placeholder="PO-12345" />
+                      <Field label="Käuferreferenz (opt.)" id="buyer_reference" placeholder="KR-98765" />
+                    </div>
+                    <Field label="Zahlungshinweis / Schlusstext" id="payment_terms" type="textarea" rows={2}
+                      defaultValue="Zahlbar sofort nach Erhalt der Rechnung ohne Abzug. Vielen Dank für Ihren Auftrag!" />
+                    <Field label="Interne Bemerkungen (Seitenende)" id="notes" type="textarea" rows={2} />
+                  </Card>
+                </div>
+
+                {/* Artikel */}
+                <Card title="Artikel / Positionen" icon="📦">
+                  {/* Add row */}
+                  <div style={{ display:"grid", gridTemplateColumns:"3fr 80px 80px 140px auto", gap:10, alignItems:"flex-end", marginBottom:14 }}>
+                    <div className="field-wrap">
+                      <label className="field-label">Bezeichnung</label>
+                      <input placeholder="Dienstleistung XY" value={newItem.name}
+                        onChange={e => setNewItem(p=>({...p,name:e.target.value}))}
+                        onKeyDown={e => e.key==="Enter" && addItem()} />
+                    </div>
+                    <div className="field-wrap">
+                      <label className="field-label">Menge</label>
+                      <input placeholder="1" value={newItem.qty} onChange={e=>setNewItem(p=>({...p,qty:e.target.value}))} />
+                    </div>
+                    <div className="field-wrap">
+                      <label className="field-label">Einheit</label>
+                      <input placeholder="Stk." value={newItem.unit} onChange={e=>setNewItem(p=>({...p,unit:e.target.value}))} />
+                    </div>
+                    <div className="field-wrap">
+                      <label className="field-label">Einzelpreis netto (€)</label>
+                      <input placeholder="0,00" value={newItem.price} onChange={e=>setNewItem(p=>({...p,price:e.target.value}))}
+                        onKeyDown={e => e.key==="Enter" && addItem()} />
+                    </div>
+                    <div style={{ paddingBottom:10 }}>
+                      <button className="btn-primary" onClick={addItem}
+                        style={{ padding:"9px 18px", borderRadius:8, fontSize:13 }}>+ Hinzufügen</button>
+                    </div>
+                  </div>
+
+                  {/* List */}
+                  <div style={{ background:"rgba(0,0,0,0.2)", borderRadius:10, border:"1px solid rgba(255,255,255,0.06)", overflow:"hidden", minHeight:90 }}>
+                    {items.length === 0
+                      ? <div style={{ padding:"28px 20px", textAlign:"center", color:"#2a3040", fontSize:13 }}>
+                          Noch keine Positionen hinzugefügt
+                        </div>
+                      : <>
+                          <div className="items-table-header">
+                            <span>#</span><span>Bezeichnung</span><span>Menge</span>
+                            <span>Einh.</span><span>Einzelpreis</span><span>Gesamt</span><span />
+                          </div>
+                          {items.map((item,i) => (
+                            <div className="items-table-row" key={item.id}>
+                              <span style={{ color:"#3a4858", fontWeight:700, fontSize:11 }}>{i+1}</span>
+                              <span style={{ fontWeight:500 }}>{item.name}</span>
+                              <span style={{ color:"#8090a8" }}>{item.qty.toFixed(2)}</span>
+                              <span style={{ color:"#8090a8" }}>{item.unit}</span>
+                              <span>{fmt(item.price)}</span>
+                              <span style={{ fontWeight:700 }}>{fmt(item.total)}</span>
+                              <button onClick={() => setItems(p=>p.filter(x=>x.id!==item.id))} style={{
+                                width:28, height:28, borderRadius:6, border:"none",
+                                background:"rgba(239,68,68,0.12)", color:"#ef4444",
+                                cursor:"pointer", fontSize:16, lineHeight:1,
+                              }}>×</button>
+                            </div>
+                          ))}
+                        </>
+                    }
+                  </div>
+                  {items.length > 0 && (
+                    <div style={{ display:"flex", justifyContent:"flex-end", gap:8, marginTop:8 }}>
+                      <button className="btn-secondary" style={{ padding:"6px 14px", fontSize:12 }}
+                        onClick={() => { if(confirm("Alle Positionen löschen?")) setItems([]); }}>
+                        Alle löschen
+                      </button>
+                    </div>
+                  )}
+                </Card>
+
+                {/* Berechnung + PDF */}
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+
+                  <Card title="Berechnung" icon="🧮">
+                    <button className="btn-secondary" style={{ width:"100%", padding:11, marginBottom:14 }} onClick={calc}>
+                      Berechnen
+                    </button>
+                    {totals ? (
+                      <div style={{ background:"rgba(0,0,0,0.2)", borderRadius:10, padding:"14px 16px", border:"1px solid rgba(255,255,255,0.06)" }}>
+                        {[
+                          ["Zwischensumme", totals.raw],
+                          ...(totals.disc > 0 ? [[`Rabatt (${totals.disc}%)`, -totals.da]] : []),
+                          ["Netto", totals.sub],
+                          [`USt. (${totals.tax}%)`, totals.taxA],
+                        ].map(([l,v]) => (
+                          <div key={l} style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", fontSize:13, color:"#8090a8", borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                            <span>{l}</span>
+                            <span style={{ color: v < 0 ? "#f87171" : "#c8d0dc" }}>{v < 0 ? "−"+fmt(-v) : fmt(v)}</span>
+                          </div>
+                        ))}
+                        <div style={{ display:"flex", justifyContent:"space-between", padding:"10px 0 2px", borderTop:"1px solid rgba(99,102,241,0.3)", marginTop:4 }}>
+                          <span style={{ fontWeight:800, fontSize:15 }}>Brutto</span>
+                          <span style={{ fontWeight:800, fontSize:20, background:"linear-gradient(90deg,#60a5fa,#a78bfa)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
+                            {fmt(totals.total)}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ textAlign:"center", padding:"20px", color:"#2a3040", fontSize:13 }}>
+                        Artikel hinzufügen &amp; Berechnen klicken
+                      </div>
+                    )}
+                  </Card>
+
+                  <Card title="Layout & PDF-Generierung" icon="🎨">
+                    <div className="field-wrap">
+                      <label className="field-label">Layout-Stil</label>
+                      <select value={theme} onChange={e => setTheme(e.target.value)}>
+                        {themes.map(t => <option key={t} value={t}>{t}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ fontSize:11, color:"#5a6880", marginBottom:16, padding:"6px 10px", background:"rgba(255,255,255,0.03)", borderRadius:6, borderLeft:"2px solid rgba(99,102,241,0.4)" }}>
+                      {THEME_DESC[theme] || ""}
+                    </div>
+
+                    <button className="btn-primary" style={{ width:"100%", padding:13, marginBottom:8, animation: loading ? "pulse-glow 1s infinite" : "none" }}
+                      onClick={generatePdf} disabled={loading}>
+                      {loading ? "⏳  Wird generiert …" : "📄  PDF generieren"}
+                    </button>
+
+                    {pdfB64 && (
+                      <div style={{ display:"flex", gap:8, marginBottom:8, animation:"fadeSlideIn 0.3s ease" }}>
+                        <button className="btn-secondary" style={{ flex:1, padding:"9px" }} onClick={previewPdf}>
+                          🔍 Vorschau
+                        </button>
+                        <button className="btn-secondary" style={{ flex:1, padding:"9px" }} onClick={savePdf}>
+                          💾 Speichern
+                        </button>
+                      </div>
+                    )}
+
+                    {pdfB64 && (
+                      <div style={{ padding:"8px 12px", borderRadius:8, background:"rgba(34,197,94,0.08)", border:"1px solid rgba(34,197,94,0.2)", fontSize:12, color:"#86efac", animation:"fadeSlideIn 0.3s ease" }}>
+                        ✓ PDF bereit — Vorschau oder Speichern
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              </div>
+            )}
+
+            {/* ── PROVIDER TAB ── */}
+            {tab === "provider" && (
+              <div style={{ display:"flex", flexDirection:"column", gap:20 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:20 }}>
+
+                  <Card title="Firmenlogo" icon="🖼️">
+                    <label style={{
+                      display:"block", border:"2px dashed rgba(255,255,255,0.1)", borderRadius:10,
+                      padding:"28px 20px", textAlign:"center", cursor:"pointer",
+                      background:"rgba(255,255,255,0.02)", transition:"all 0.2s",
+                    }}
+                      onMouseEnter={e=>{e.currentTarget.style.borderColor="rgba(99,102,241,0.4)";e.currentTarget.style.background="rgba(99,102,241,0.04)";}}
+                      onMouseLeave={e=>{e.currentTarget.style.borderColor="rgba(255,255,255,0.1)";e.currentTarget.style.background="rgba(255,255,255,0.02)";}}>
+                      <div style={{ fontSize:32, marginBottom:8 }}>📁</div>
+                      <div style={{ fontSize:13, color:"#6070a0", marginBottom:4 }}>Logo auswählen …</div>
+                      <div style={{ fontSize:11, color:"#3a4050" }}>PNG, JPG, BMP</div>
+                      <input type="file" accept=".png,.jpg,.jpeg,.bmp" style={{ display:"none" }} onChange={uploadLogo} />
+                    </label>
+                    {provider.logo_path && (
+                      <div style={{ marginTop:8, fontSize:11, color:"#4a6070", wordBreak:"break-all" }}>
+                        ✓ {provider.logo_path}
+                      </div>
+                    )}
+                  </Card>
+
+                  <Card title="Bankverbindung" icon="🏦">
+                    <Field label="Bankname" placeholder="Musterbank AG" value={provFields.bank} onChange={setPF("bank")} />
+                    <Field label="IBAN" placeholder="DE89 3704 0044 0532 0130 00" required value={provFields.bank_account} onChange={setPF("bank_account")} />
+                    <Field label="BIC" placeholder="COBADEFFXXX" value={provFields.bank_bic} onChange={setPF("bank_bic")} />
+                  </Card>
+                </div>
+
+                <Card title="Firmeninformationen" icon="🏢">
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                    <Field label="Firmenname" placeholder="Musterfirma GmbH" required value={provFields.company_name} onChange={setPF("company_name")} />
+                    <Field label="Inhaber" placeholder="Max Mustermann" value={provFields.owner} onChange={setPF("owner")} />
+                    <Field label="Ansprechpartner" placeholder="Erika Musterfrau" value={provFields.contact_person} onChange={setPF("contact_person")} />
+                    <Field label="Telefon" placeholder="+49 30 12345678" value={provFields.phone} onChange={setPF("phone")} />
+                    <Field label="E-Mail" placeholder="info@musterfirma.de" value={provFields.email} onChange={setPF("email")} />
+                    <Field label="Steuernummer / USt-IdNr." placeholder="DE123456789" value={provFields.tax_id} onChange={setPF("tax_id")} />
+                    <Field label="Gläubiger-ID SEPA (opt.)" placeholder="DE98ZZZ09999999999" value={provFields.creditor_reference} onChange={setPF("creditor_reference")} />
+                  </div>
+                  <Field label="Anschrift (Zeile 1: Straße | Zeile 2: PLZ Ort)"
+                    type="textarea" rows={2} placeholder={"Musterstraße 1\n12345 Berlin"} value={provFields.address} onChange={setPF("address")} />
+                </Card>
+
+                <button className="btn-primary" style={{ padding:"14px", fontSize:15 }} onClick={saveProvider}>
+                  💾  Einstellungen speichern
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Toast */}
+          {toast && <Toast key={toast.key} msg={toast.msg} type={toast.type} onDone={() => setToast(null)} />}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+
+RechnnungPro_2024.spec
+logo.gif
+BUILD_GUIDE.md
+dist/
+build/
+__pycache__/
+venv/
+build.ps1
+config.json
+templates/
