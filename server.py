@@ -1,6 +1,6 @@
 """
-FRechnung — Flask REST-API
-Verbindet das React-Frontend mit pdf_generator & config_manager.
+FRechnung — Flask REST-API (Cloud/Demo Version)
+Für Railway-Deployment — ohne pywebview, PDF-Download über Browser.
 """
 
 from flask import Flask, request, jsonify, send_file, send_from_directory
@@ -9,11 +9,12 @@ import base64
 import os
 import sys
 import io
+import tempfile
 
 from config_manager import ConfigManager
 from pdf_generator import create_invoice_pdf, THEME_NAMES
 
-# ── Ressourcenpfad (PyInstaller-kompatibel) ───────────────────────────────────
+# ── Ressourcenpfad ────────────────────────────────────────────────────────────
 def resource_path(relative_path):
     if hasattr(sys, "_MEIPASS"):
         base = sys._MEIPASS
@@ -28,22 +29,15 @@ CORS(app)
 
 config_manager = ConfigManager()
 
-# Wird von main.py gesetzt, bevor der Server startet
-APP_PORT: int = 5757
-
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    """
-    Liest index.html und ersetzt den Platzhalter __APP_PORT__ mit dem
-    tatsächlichen Port. So kennt das Frontend immer die richtige API-URL,
-    auch wenn main.py einen zufälligen Port gewählt hat.
-    """
     html_path = os.path.join(FRONTEND_DIR, "index.html")
     with open(html_path, "r", encoding="utf-8") as f:
         html = f.read()
-    html = html.replace("__APP_PORT__", str(APP_PORT))
+    # In der Cloud gibt es keinen zufälligen Port — Platzhalter einfach leer lassen
+    html = html.replace("__APP_PORT__", "")
     return html, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 @app.route("/favicon.ico")
@@ -68,6 +62,24 @@ def save_provider():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── Logo: Datei hochladen (base64) ────────────────────────────────────────────
+@app.route("/api/provider/logo/upload", methods=["POST"])
+def upload_logo():
+    data = request.get_json()
+    b64  = data.get("data", "")
+    name = data.get("name", "logo.png")
+    try:
+        # In der Cloud: temporäres Verzeichnis nutzen
+        save_dir = tempfile.mkdtemp(prefix="FRechnung_")
+        path = os.path.join(save_dir, name)
+        with open(path, "wb") as f:
+            f.write(base64.b64decode(b64))
+        config_manager.set_logo_path(path)
+        return jsonify({"ok": True, "path": path})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
 # ── Logo: Pfad setzen ─────────────────────────────────────────────────────────
 @app.route("/api/provider/logo", methods=["POST"])
 def set_logo():
@@ -76,24 +88,6 @@ def set_logo():
     try:
         config_manager.set_logo_path(path)
         return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
-
-
-# ── Logo: Datei hochladen (base64) ────────────────────────────────────────────
-@app.route("/api/provider/logo/upload", methods=["POST"])
-def upload_logo():
-    data = request.get_json()
-    b64  = data.get("data", "")
-    name = data.get("name", "logo.png")
-    try:
-        save_dir = os.path.join(os.path.expanduser("~"), "FRechnung")
-        os.makedirs(save_dir, exist_ok=True)
-        path = os.path.join(save_dir, name)
-        with open(path, "wb") as f:
-            f.write(base64.b64decode(b64))
-        config_manager.set_logo_path(path)
-        return jsonify({"ok": True, "path": path})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -134,22 +128,31 @@ def generate_pdf():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
-# ── PDF speichern ─────────────────────────────────────────────────────────────
+# ── PDF herunterladen (Browser-Download statt lokalem Speichern) ──────────────
 @app.route("/api/save-pdf", methods=["POST"])
 def save_pdf():
-    payload   = request.get_json()
-    b64       = payload.get("pdf_base64", "")
-    filename  = payload.get("filename", "Rechnung.pdf")
-    save_dir  = os.path.join(os.path.expanduser("~"), "FRechnung", "Rechnungen")
-    os.makedirs(save_dir, exist_ok=True)
-    path = os.path.join(save_dir, filename)
+    """
+    Cloud-Version: Schickt das PDF direkt als Datei-Download zurück.
+    Der Browser zeigt automatisch den Speichern-Dialog.
+    """
+    payload  = request.get_json()
+    b64      = payload.get("pdf_base64", "")
+    filename = payload.get("filename", "Rechnung.pdf")
+
     try:
-        with open(path, "wb") as f:
-            f.write(base64.b64decode(b64))
-        return jsonify({"ok": True, "path": path})
+        pdf_bytes = base64.b64decode(b64)
+        return send_file(
+            io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=True,
+            download_name=filename,
+        )
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+# ── Einstiegspunkt ────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    app.run(port=5757, debug=True)
+    # Railway setzt $PORT automatisch — fallback auf 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port, debug=False)
