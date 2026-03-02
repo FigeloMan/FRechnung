@@ -1,82 +1,79 @@
-"""
-Config Manager Module
-
-This module handles the loading and saving of service provider settings
-to a local JSON configuration file.
-"""
-
 import json
 import os
 import sys
-from typing import Dict, Any, Optional
+import keyring
+from typing import Dict, Any
+from cryptography.fernet import Fernet
 
-
-def _get_config_path(filename: str = "config.json") -> str:
-    """
-    Gibt einen stabilen, absoluten Pfad zur config.json zurück.
-    Funktioniert sowohl normal als auch als PyInstaller-.exe.
-    
-    Speicherort:
-      - Normal:      neben der config_manager.py
-      - Als .exe:    %USERPROFILE%/FRechnung/config.json
-                     (da _MEIPASS ein temporäres Verzeichnis ist)
-    """
+def _get_config_path(filename: str = "user_profile.dat") -> str:
+    """Nutzt eine unscheinbare Dateiendung wie .dat statt .json"""
     if hasattr(sys, "_MEIPASS"):
-        # Als gebündelte .exe → AppData-ähnlicher Ordner im Benutzerverzeichnis
         base = os.path.join(os.path.expanduser("~"), "FRechnung")
     else:
-        # Normaler Betrieb → neben dieser Datei
         base = os.path.dirname(os.path.abspath(__file__))
 
     os.makedirs(base, exist_ok=True)
     return os.path.join(base, filename)
 
-
 class ConfigManager:
-    """Manages configuration settings for the service provider profile."""
-
     def __init__(self, config_file: str = None):
-        """
-        Initialize the ConfigManager.
-
-        Args:
-            config_file: Optionaler absoluter Pfad zur config.json.
-                         Wird keiner übergeben, wird automatisch ein
-                         stabiler Pfad ermittelt.
-        """
         self.config_file = config_file if config_file else _get_config_path()
+        self.service_name = "FRechnung_App"
+        self.key_name = "encryption_key"
+        
+        # Fernet Instanz mit Key aus dem Windows Tresor
+        self.fernet = Fernet(self._get_or_create_key())
+        
         self.default_config = {
             "service_provider": {
-                "company_name": "",
-                "owner": "",
-                "contact_person": "",
-                "phone": "",
-                "email": "",
-                "address": "",
-                "tax_id": "",
-                "tax_number": "",
-                "creditor_reference": "",
-                "bank": "",
-                "bank_account": "",
-                "bank_bic": "",
-                "logo_path": "",
+                "company_name": "", "owner": "", "contact_person": "",
+                "phone": "", "email": "", "address": "", "tax_id": "",
+                "tax_number": "", "creditor_reference": "", "bank": "",
+                "bank_account": "", "bank_bic": "", "logo_path": "",
             }
         }
         self.config = self._load_config()
 
+    def _get_or_create_key(self) -> bytes:
+        stored_key = keyring.get_password(self.service_name, self.key_name)
+        if stored_key is None:
+            new_key = Fernet.generate_key().decode('utf-8')
+            keyring.set_password(self.service_name, self.key_name, new_key)
+            return new_key.encode('utf-8')
+        return stored_key.encode('utf-8')
+
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from the JSON file."""
+        """Lädt die unkenntliche .dat Datei und entschlüsselt sie."""
         if os.path.exists(self.config_file):
             try:
-                with open(self.config_file, "r", encoding="utf-8") as f:
-                    loaded_config = json.load(f)
-                return self._merge_with_defaults(loaded_config)
-            except (json.JSONDecodeError, IOError) as e:
-                print(f"[ConfigManager] Fehler beim Laden: {e}")
+                with open(self.config_file, "rb") as f:
+                    # Wir lesen die kryptischen Binärdaten
+                    encrypted_data = f.read()
+                
+                if not encrypted_data:
+                    return self.default_config.copy()
+
+                # Entschlüsseln und von Byte zu String (JSON) umwandeln
+                decrypted_data = self.fernet.decrypt(encrypted_data)
+                return self._merge_with_defaults(json.loads(decrypted_data.decode("utf-8")))
+            except Exception:
+                # Falls Datei beschädigt oder Key falsch
+                return self.default_config.copy()
         return self.default_config.copy()
 
+    def _save_config(self) -> None:
+        """Verwandelt JSON in verschlüsselten Binärcode und speichert als .dat"""
+        try:
+            # Kompakter JSON-String ohne Einrückungen (spart Platz und verschleiert Struktur)
+            json_str = json.dumps(self.config, ensure_ascii=False)
+            encrypted_data = self.fernet.encrypt(json_str.encode("utf-8"))
+            
+            with open(self.config_file, "wb") as f:
+                f.write(encrypted_data)
+        except Exception as e:
+            print(f"Fehler: {e}")
+
     def _merge_with_defaults(self, loaded_config: Dict[str, Any]) -> Dict[str, Any]:
-        """Merge loaded config with defaults so all keys always exist."""
         import copy
         merged = copy.deepcopy(self.default_config)
         for key, value in loaded_config.items():
@@ -86,31 +83,12 @@ class ConfigManager:
                 merged[key] = value
         return merged
 
+    # --- Die gewohnten Getter/Setter ---
     def get_service_provider(self) -> Dict[str, str]:
-        """Get service provider settings."""
         return self.config.get("service_provider", {})
 
     def set_service_provider(self, data: Dict[str, str]) -> None:
-        """Update and persist service provider settings."""
         if "service_provider" not in self.config:
             self.config["service_provider"] = {}
-        for key, value in data.items():
-            self.config["service_provider"][key] = value
-        self._save_config()
-
-    def _save_config(self) -> None:
-        """Save the current configuration to the JSON file."""
-        try:
-            with open(self.config_file, "w", encoding="utf-8") as f:
-                json.dump(self.config, f, indent=4, ensure_ascii=False)
-        except IOError as e:
-            print(f"[ConfigManager] Fehler beim Speichern: {e}")
-
-    def get_logo_path(self) -> str:
-        """Get the path to the service provider logo."""
-        return self.config.get("service_provider", {}).get("logo_path", "")
-
-    def set_logo_path(self, path: str) -> None:
-        """Set the path to the service provider logo."""
-        self.config.setdefault("service_provider", {})["logo_path"] = path
+        self.config["service_provider"].update(data)
         self._save_config()
