@@ -10,7 +10,7 @@
 
 ### Highlights
    Offiziele Seite frechnung.de
-- Elegante PDF-Rechnungen in **8 wählbaren Design-Themen**
+- Elegante PDF-Rechnungen in **22 wählbaren Design-Themen**
 - **EN 16931 konformes XML** eingebettet (ZUGFeRD 2.2 / Factur-X Basic)
 - **B2C-, B2B- und B2G-Modus** — je nach Rechnungsart werden die passenden Pflicht- und Optionalfelder eingeblendet
 - Integrierter **PDF-Viewer** mit Zoom, Seitennavigation und Scrollen
@@ -29,18 +29,8 @@
 ### Abhängigkeiten installieren
 
 ```bash
-pip install customtkinter fpdf2 pypdf pdf2image Pillow
+pip install flask flask-cors pywebview pyinstaller reportlab Pillow cryptography keyring
 ```
-
-Für den integrierten PDF-Viewer wird zusätzlich **Poppler** benötigt:
-
-| Betriebssystem | Installationsweg |
-|----------------|-----------------|
-| **Windows**    | [poppler-windows Releases](https://github.com/oschwartz10612/poppler-windows/releases) herunterladen, entpacken, Pfad zur `bin/`-Ordner in die PATH-Umgebungsvariable eintragen |
-| **macOS**      | `brew install poppler` |
-| **Linux**      | `sudo apt install poppler-utils` |
-
-> **Hinweis:** Ohne Poppler / pdf2image ist der integrierte Viewer nicht verfügbar. Das Generieren und Speichern von PDFs funktioniert aber weiterhin vollständig. Über den Button „Extern öffnen" kann die Datei im Standard-PDF-Programm geöffnet werden.
 
 ### Schriftarten (optional, empfohlen)
 
@@ -63,7 +53,6 @@ Ohne diese Dateien verwendet die Anwendung automatisch Helvetica als Fallback.
 invoice-master/
 ├── main.py              # Hauptanwendung (GUI)
 ├── pdf_generator.py     # PDF-Erzeugung + ZUGFeRD-XML-Generator
-├── pdf_viewer.py        # Integrierter PDF-Viewer
 ├── config_manager.py    # Einstellungsverwaltung (JSON)
 ├── DejaVuSans.ttf       # (optional) Unicode-Schrift
 ├── DejaVuSans-Bold.ttf  # (optional) Unicode-Schrift Bold
