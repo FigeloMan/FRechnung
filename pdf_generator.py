@@ -1,19 +1,26 @@
 """
-PDF Generator — ZUGFeRD 2.2 / Factur-X Basic (EN 16931)  v15.0
+PDF Generator — ZUGFeRD 2.3.3 / Factur-X Basic (EN 16931)  v17.1
 
-14 Designs:
+21 Designs:
   Klassisch Blau  · Modern Minimal  · Bold Dunkel    · Elegant Grün
   Corporate Grau  · Sunset Orange   · Premium Navy   · Bauunternehmen
-  ── NEU ──
   Rounded Card    · Soft Pastel     · Dark Neon       · Rose Gold
-  Slate Clean     · Typewriter
+  Slate Clean     · Typewriter      · Arctic Frost   · Forest Zen
+  Midnight Purple · Warm Linen      · Tech Blueprint · Sakura
+  Carbon          · Swiss Precision
+
+v17.1: Helvetica-Fallback mit EUR statt € (kein Unicode-Crash mehr)
 """
 
-import os, sys, io, math
+import os, sys, io
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from fpdf import FPDF
 from pypdf import PdfReader, PdfWriter
+from pypdf.generic import (
+    DictionaryObject, NameObject, DecodedStreamObject, BooleanObject,
+    ArrayObject, ByteStringObject, NumberObject,
+)
 
 
 def resource_path(p):
@@ -30,6 +37,8 @@ LOGO_H   = 22
 LOGO_GAP = 6
 ADDR_Y   = 52
 TABLE_Y  = 110
+
+ZUGFERD_GUIDELINE = "urn:cen.eu:en16931:2017#compliant#urn:zugferd.de:2p0:basic"
 
 
 THEMES = {
@@ -97,7 +106,6 @@ THEMES = {
         "HDR_TEXT":   (255, 255, 255), "TOTAL_BG":   (198,  78,   0),
         "TOTAL_TXT":  (255, 255, 255),
     },
-    # ── NEU ──────────────────────────────────────────────────────────────────
     "Rounded Card": {
         "layout": "rounded",
         "PRIMARY":    (45,  85, 195),  "ACCENT":     (100, 149, 237),
@@ -146,7 +154,6 @@ THEMES = {
         "HDR_TEXT":   (255, 252, 245), "TOTAL_BG":   (38,  28,  18),
         "TOTAL_TXT":  (248, 244, 234),
     },
-    # ── NEU v15.1 ─────────────────────────────────────────────────────────────
     "Arctic Frost": {
         "layout": "arctic",
         "PRIMARY":    (15,  95, 155),  "ACCENT":     (100, 200, 240),
@@ -224,12 +231,82 @@ def _lines(*pairs):
     ]
 
 
+def _build_xmp(invoice_number: str, invoice_date: str) -> bytes:
+    now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+    xmp = (
+        '<?xpacket begin="\xef\xbb\xbf" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'
+        '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'
+        '  <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'
+        '    <rdf:Description rdf:about=""\n'
+        '        xmlns:pdfaid="http://www.aiim.org/pdfa/ns/id/">\n'
+        '      <pdfaid:part>3</pdfaid:part>\n'
+        '      <pdfaid:conformance>B</pdfaid:conformance>\n'
+        '    </rdf:Description>\n'
+        '    <rdf:Description rdf:about=""\n'
+        '        xmlns:dc="http://purl.org/dc/elements/1.1/">\n'
+        '      <dc:format>application/pdf</dc:format>\n'
+        '      <dc:title><rdf:Alt><rdf:li xml:lang="x-default">'
+        f'ZUGFeRD Rechnung {invoice_number}'
+        '</rdf:li></rdf:Alt></dc:title>\n'
+        '    </rdf:Description>\n'
+        '    <rdf:Description rdf:about=""\n'
+        '        xmlns:xmp="http://ns.adobe.com/xap/1.0/">\n'
+        f'      <xmp:CreatorTool>FRechnung v1.2.0</xmp:CreatorTool>\n'
+        f'      <xmp:CreateDate>{now}</xmp:CreateDate>\n'
+        f'      <xmp:ModifyDate>{now}</xmp:ModifyDate>\n'
+        '    </rdf:Description>\n'
+        '    <rdf:Description rdf:about=""\n'
+        '        xmlns:fx="urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#">\n'
+        '      <fx:DocumentType>INVOICE</fx:DocumentType>\n'
+        '      <fx:DocumentFileName>factur-x.xml</fx:DocumentFileName>\n'
+        '      <fx:Version>2.3</fx:Version>\n'
+        '      <fx:ConformanceLevel>BASIC</fx:ConformanceLevel>\n'
+        '    </rdf:Description>\n'
+        '    <rdf:Description rdf:about=""\n'
+        '        xmlns:pdfaExtension="http://www.aiim.org/pdfa/ns/extension/"\n'
+        '        xmlns:pdfaSchema="http://www.aiim.org/pdfa/ns/schema#"\n'
+        '        xmlns:pdfaProperty="http://www.aiim.org/pdfa/ns/property#">\n'
+        '      <pdfaExtension:schemas><rdf:Bag><rdf:li rdf:parseType="Resource">\n'
+        '        <pdfaSchema:schema>Factur-X PDFA Extension Schema</pdfaSchema:schema>\n'
+        '        <pdfaSchema:namespaceURI>urn:factur-x:pdfa:CrossIndustryDocument:invoice:1p0#</pdfaSchema:namespaceURI>\n'
+        '        <pdfaSchema:prefix>fx</pdfaSchema:prefix>\n'
+        '        <pdfaSchema:property><rdf:Seq>\n'
+        '          <rdf:li rdf:parseType="Resource"><pdfaProperty:name>DocumentType</pdfaProperty:name>'
+        '<pdfaProperty:valueType>Text</pdfaProperty:valueType>'
+        '<pdfaProperty:category>external</pdfaProperty:category>'
+        '<pdfaProperty:description>The document type</pdfaProperty:description></rdf:li>\n'
+        '          <rdf:li rdf:parseType="Resource"><pdfaProperty:name>DocumentFileName</pdfaProperty:name>'
+        '<pdfaProperty:valueType>Text</pdfaProperty:valueType>'
+        '<pdfaProperty:category>external</pdfaProperty:category>'
+        '<pdfaProperty:description>The XML file name</pdfaProperty:description></rdf:li>\n'
+        '          <rdf:li rdf:parseType="Resource"><pdfaProperty:name>Version</pdfaProperty:name>'
+        '<pdfaProperty:valueType>Text</pdfaProperty:valueType>'
+        '<pdfaProperty:category>external</pdfaProperty:category>'
+        '<pdfaProperty:description>The ZUGFeRD version</pdfaProperty:description></rdf:li>\n'
+        '          <rdf:li rdf:parseType="Resource"><pdfaProperty:name>ConformanceLevel</pdfaProperty:name>'
+        '<pdfaProperty:valueType>Text</pdfaProperty:valueType>'
+        '<pdfaProperty:category>external</pdfaProperty:category>'
+        '<pdfaProperty:description>The ZUGFeRD conformance level</pdfaProperty:description></rdf:li>\n'
+        '        </rdf:Seq></pdfaSchema:property>\n'
+        '      </rdf:li></rdf:Bag></pdfaExtension:schemas>\n'
+        '    </rdf:Description>\n'
+        '  </rdf:RDF>\n'
+        '</x:xmpmeta>\n'
+        '<?xpacket end="w"?>'
+    )
+    return xmp.encode("utf-8")
+
+
 class PDFGenerator(FPDF):
 
     def __init__(self, theme_name="Klassisch Blau"):
         super().__init__(orientation='P', unit='mm', format='A4')
         self.set_auto_page_break(auto=True, margin=42)
+        # Fonts zuerst laden — cur wird dabei gesetzt
         self._setup_fonts()
+        # Spaltenheader abhängig von cur (€ oder EUR)
+        self._H = ["POS", "BESCHREIBUNG", "MENGE",
+                   f"EINZEL {self.cur}", f"SUMME {self.cur}"]
         self.logo_path          = ""
         self.invoice_number     = "---"
         self.invoice_date       = "---"
@@ -246,35 +323,63 @@ class PDFGenerator(FPDF):
             setattr(self, k, t[k])
 
     def _setup_fonts(self):
+        """
+        Versucht DejaVu Unicode-Fonts zu laden.
+        Gelingt es nicht, wird auf Helvetica zurückgefallen —
+        in diesem Fall wird self.cur = 'EUR' gesetzt statt '€',
+        damit kein Unicode-Crash entsteht.
+        """
         r = resource_path("DejaVuSans.ttf")
         b = resource_path("DejaVuSans-Bold.ttf")
         if os.path.exists(r) and os.path.exists(b):
-            self.add_font("DejaVu", "",  r)
-            self.add_font("DejaVu", "B", b)
-            self.fn = "DejaVu"
-        else:
-            self.fn = "Helvetica"
-
-    def _measure_logo(self):
-        if self.logo_path and os.path.exists(self.logo_path):
+            # Veraltete .pkl-Cache-Dateien löschen
+            for ttf in [r, b]:
+                pkl = ttf.replace(".ttf", ".pkl")
+                if os.path.exists(pkl):
+                    try: os.remove(pkl)
+                    except: pass
             try:
-                from PIL import Image as PILImg
-                with PILImg.open(self.logo_path) as im:
-                    w_px, h_px = im.size
-                self._logo_w = LOGO_H * (w_px / h_px)
-            except Exception:
-                self._logo_w = LOGO_H
+                self.add_font("DejaVu", "",  r, uni=True)
+                self.add_font("DejaVu", "B", b, uni=True)
+                self.fn  = "DejaVu"
+                self.cur = "\u20ac"   # € — Unicode verfügbar
+                return
+            except Exception as e:
+                print(f"[FRechnung] Font-Ladefehler: {e} — Fallback auf Helvetica")
         else:
-            self._logo_w = 0.0
+            print(f"[FRechnung] DejaVu-Fonts nicht gefunden in: {r} — Fallback auf Helvetica")
+        # Helvetica-Fallback: kein Unicode → EUR statt €
+        self.fn  = "Helvetica"
+        self.cur = "EUR"
 
-    def _logo_right(self):
-        return PAGE_L + self._logo_w + LOGO_GAP if self._logo_w > 0 else PAGE_L
+    def _safe(self, text: str) -> str:
+        """
+        Bereinigt Text für Helvetica-Fallback:
+        Ersetzt bekannte Unicode-Zeichen durch Latin-1-kompatible Alternativen.
+        Bei DejaVu wird der Text unverändert zurückgegeben.
+        """
+        if self.fn != "Helvetica":
+            return text
+        replacements = {
+            "\u20ac": "EUR",   # €
+            "\u2212": "-",     # −
+            "\u00b7": "·",     # · (Mittelpunkt — Latin-1 safe)
+            "\u2013": "-",     # –
+            "\u2014": "--",    # —
+            "\u201c": '"',     # "
+            "\u201d": '"',     # "
+            "\u2018": "'",     # '
+            "\u2019": "'",     # '
+        }
+        for uni, asc in replacements.items():
+            text = text.replace(uni, asc)
+        # Alles was noch nicht Latin-1 ist, ersetzen
+        return text.encode("latin-1", errors="replace").decode("latin-1")
 
     # ── Zeichenhilfen ─────────────────────────────────────────────────────────
     def _rounded_rect(self, x, y, w, h, r, style=""):
-        """Zeichnet ein Rechteck mit abgerundeten Ecken (Radius r in mm)."""
         r = min(r, w / 2, h / 2)
-        k = 0.5523  # Bezier-Annäherung für Kreisbogen
+        k = 0.5523
         self.move_to(x + r, y)
         self.line_to(x + w - r, y)
         self._bezier(x + w - r, y, x + w - r + k*r, y, x + w, y + r - k*r, x + w, y + r)
@@ -300,12 +405,10 @@ class PDFGenerator(FPDF):
         self._out(f"{x*self.k:.2f} {(self.h - y)*self.k:.2f} l")
 
     def _shadow_rect(self, x, y, w, h, r=2, shadow=1.2):
-        """Zeichnet einen Schatten-Effekt unter einem Rechteck."""
         self.set_fill_color(200, 205, 215)
         self._rounded_rect(x + shadow, y + shadow, w, h, r, "F")
 
     def _pill_badge(self, x, y, text, bg, fg, font_size=7.5):
-        """Zeichnet ein Pill-Badge (abgerundetes Label)."""
         self.set_font(self.fn, "B", font_size)
         tw = self.get_string_width(text)
         pw = tw + 6; ph = 5.5; r = ph / 2
@@ -314,7 +417,7 @@ class PDFGenerator(FPDF):
         self.set_text_color(*fg)
         self.set_xy(x, y + 0.5)
         self.cell(pw, ph - 0.5, text, 0, 0, "C")
-        return pw  # Breite zurückgeben
+        return pw
 
     # ── PAGE HEADER ───────────────────────────────────────────────────────────
     def header(self):
@@ -342,6 +445,21 @@ class PDFGenerator(FPDF):
             "carbon":     self._hdr_carbon,
             "swiss":      self._hdr_swiss,
         }.get(self.layout, self._hdr_default)(lx)
+
+    def _measure_logo(self):
+        if self.logo_path and os.path.exists(self.logo_path):
+            try:
+                from PIL import Image as PILImg
+                with PILImg.open(self.logo_path) as im:
+                    w_px, h_px = im.size
+                self._logo_w = LOGO_H * (w_px / h_px)
+            except Exception:
+                self._logo_w = LOGO_H
+        else:
+            self._logo_w = 0.0
+
+    def _logo_right(self):
+        return PAGE_L + self._logo_w + LOGO_GAP if self._logo_w > 0 else PAGE_L
 
     def _hdr_default(self, lx):
         avail = PAGE_R - lx
@@ -396,15 +514,10 @@ class PDFGenerator(FPDF):
         self.set_xy(PAGE_R - 78, 7);  self.cell(78, 5, f"Nr: {self.invoice_number}", 0, 1, "R")
         self.set_xy(PAGE_R - 78, 13); self.cell(78, 5, f"Datum: {self.invoice_date}", 0, 1, "R")
 
-    # ── Neue Header ───────────────────────────────────────────────────────────
-
     def _hdr_rounded(self, lx):
-        """Rounded Card: sanfte abgerundete Box rechts, weicher Schatten."""
         bw = PAGE_R - lx; bh = 26
-        # Schatten
         self.set_fill_color(210, 218, 240)
         self._rounded_rect(lx + 1.5, 8 + 1.5, bw, bh, 5, "F")
-        # Box
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(lx, 8, bw, bh, 5, "F")
         self.set_font(self.fn, "B", 18); self.set_text_color(*self.HDR_TEXT)
@@ -415,47 +528,34 @@ class PDFGenerator(FPDF):
         self.cell((bw-12)/2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
 
     def _hdr_pastel(self, lx):
-        """Soft Pastel: pastellfarbener Balken, Pill-Badges für Nr und Datum."""
         avail = PAGE_R - lx
-        # Sanfter Hintergrundstreifen
         self.set_fill_color(250, 230, 248)
         self.rect(0, 0, 210, 32, "F")
-        # Dekorativer Kreis links
         self.set_fill_color(*self.ACCENT)
         self.ellipse(5, 2, 12, 12, "F")
         self.set_fill_color(*self.PRIMARY)
         self.ellipse(8, 5, 6, 6, "F")
-        # Text
         self.set_font(self.fn, "B", 22); self.set_text_color(*self.PRIMARY)
         self.set_xy(lx, 9); self.cell(avail, 10, "RECHNUNG", 0, 0, "R")
-        # Pill-Badges
         self._pill_badge(PAGE_R - 88, 22, f"Nr: {self.invoice_number}", self.PRIMARY, (255,255,255), 7)
         self._pill_badge(PAGE_R - 50, 22, self.invoice_date, self.ACCENT, (255,255,255), 7)
 
     def _hdr_neon(self, lx):
-        """Dark Neon: schwarzer Balken, leuchtende Neon-Akzentlinie."""
-        # Dunkler Hintergrund
         self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 32, "F")
-        # Neon-Linie oben
         self.set_draw_color(*self.ACCENT); self.set_line_width(1.8)
         self.line(0, 0, 210, 0)
-        # Neon-Linie unten
         self.set_line_width(0.8)
         self.line(lx, 31, PAGE_R, 31)
-        # RECHNUNG-Text
         self.set_font(self.fn, "B", 20); self.set_text_color(*self.ACCENT)
         avail = PAGE_R - lx
         self.set_xy(lx, 10); self.cell(avail, 10, "RECHNUNG", 0, 0, "R")
-        # Meta
         self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
         self.set_xy(lx, 22)
         self.cell(avail/2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
         self.cell(avail/2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
 
     def _hdr_rosegold(self, lx):
-        """Rose Gold: diagonaler Farbverlauf-Effekt, elegante Typografie."""
         avail = PAGE_R - lx
-        # Gestufter Hintergrund (Verlauf-Simulation mit Streifen)
         steps = 20
         for i in range(steps):
             t = i / steps
@@ -464,10 +564,8 @@ class PDFGenerator(FPDF):
             b = int(self.PRIMARY[2] + (self.ACCENT[2] - self.PRIMARY[2]) * t)
             self.set_fill_color(r, g, b)
             self.rect(lx + i * (avail / steps), 0, avail / steps + 0.5, 30, "F")
-        # RECHNUNG
         self.set_font(self.fn, "B", 19); self.set_text_color(255, 248, 244)
         self.set_xy(lx + 5, 8); self.cell(avail - 10, 10, "RECHNUNG", 0, 0, "L")
-        # Gold-Dekorlinie
         self.set_draw_color(255, 220, 180); self.set_line_width(0.6)
         self.line(lx + 5, 20, PAGE_R - 5, 20)
         self.set_font(self.fn, "", 7.5); self.set_text_color(255, 235, 220)
@@ -476,8 +574,6 @@ class PDFGenerator(FPDF):
         self.cell((avail-10)/2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
 
     def _hdr_slate(self, lx):
-        """Slate Clean: linker farbiger Akzentbalken, sauberes Layout."""
-        # Linker Akzentstreifen
         self.set_fill_color(*self.ACCENT); self.rect(0, 0, 5, 40, "F")
         avail = PAGE_R - lx
         self.set_font(self.fn, "B", 24); self.set_text_color(*self.PRIMARY)
@@ -490,14 +586,11 @@ class PDFGenerator(FPDF):
         self.cell(avail/2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
 
     def _hdr_type(self, lx):
-        """Typewriter: Vintage-Look, Rahmen, Stempeloptik."""
         avail = PAGE_R - lx
-        # Äußerer Rahmen
         self.set_draw_color(*self.PRIMARY); self.set_line_width(1.2)
         self.rect(lx, 7, avail, 22)
         self.set_line_width(0.4)
         self.rect(lx + 1.5, 8.5, avail - 3, 19)
-        # Text
         self.set_font(self.fn, "B", 20); self.set_text_color(*self.PRIMARY)
         self.set_xy(lx, 10); self.cell(avail, 10, "RECHNUNG", 0, 0, "C")
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.3)
@@ -507,6 +600,149 @@ class PDFGenerator(FPDF):
         self.cell(avail/2, 5, f"Nr: {self.invoice_number}", 0, 0, "C")
         self.set_xy(lx, 22)
         self.cell(avail - 4, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_arctic(self, lx):
+        avail = PAGE_R - lx
+        self.set_fill_color(*self.PRIMARY)
+        self.rect(lx, 0, avail + 15, 30, "F")
+        for i, alpha in [(0, 60), (6, 100), (12, 140)]:
+            r = int(self.ACCENT[0] * alpha // 255 + self.PRIMARY[0] * (255 - alpha) // 255)
+            g = int(self.ACCENT[1] * alpha // 255 + self.PRIMARY[1] * (255 - alpha) // 255)
+            b = int(self.ACCENT[2] * alpha // 255 + self.PRIMARY[2] * (255 - alpha) // 255)
+            self.set_fill_color(r, g, b)
+            self.set_draw_color(r, g, b)
+            self.move_to(PAGE_R - 30 + i, 0)
+            self.line_to(PAGE_R + 15, 0)
+            self.line_to(PAGE_R + 15, 30 - i * 2)
+            self._out("f")
+        self.set_font(self.fn, "B", 19); self.set_text_color(255, 255, 255)
+        self.set_xy(lx + 6, 7); self.cell(avail - 40, 10, "RECHNUNG", 0, 0, "L")
+        self.set_draw_color(*self.ACCENT); self.set_line_width(1.2)
+        self.line(lx, 30, PAGE_R, 30)
+        self.set_font(self.fn, "", 7.5); self.set_text_color(200, 235, 255)
+        self.set_xy(lx + 6, 21)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_zen(self, lx):
+        avail = PAGE_R - lx
+        self.set_draw_color(*self.PRIMARY); self.set_line_width(2.5)
+        self.line(0, 0, 210, 0)
+        self.set_line_width(0.4)
+        for xi in [5, 8, 10.5]:
+            self.set_draw_color(*self.ACCENT)
+            self.line(xi, 2, xi, 34)
+        self.set_font(self.fn, "B", 22); self.set_text_color(*self.PRIMARY)
+        self.set_xy(lx, LOGO_Y + 2); self.cell(avail, 11, "RECHNUNG", 0, 1, "R")
+        self.set_draw_color(*self.ACCENT); self.set_line_width(0.6)
+        self.line(lx, LOGO_Y + 14, PAGE_R, LOGO_Y + 14)
+        self.set_fill_color(*self.ACCENT)
+        self.ellipse(lx - 0.5, LOGO_Y + 12, 4, 4, "F")
+        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx + 6, LOGO_Y + 16)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2 - 6, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_midnight(self, lx):
+        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 33, "F")
+        avail = PAGE_R - lx
+        self.set_draw_color(*self.ACCENT)
+        for w in [2.5, 1.2, 0.5]:
+            self.set_line_width(w)
+            self.line(lx, 32, PAGE_R, 32)
+        self.set_font(self.fn, "B", 20); self.set_text_color(*self.ACCENT)
+        self.set_xy(lx, 8); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
+        self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx, 22)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_linen(self, lx):
+        avail = PAGE_R - lx
+        for i in range(0, 32, 4):
+            shade = 248 - (i % 8)
+            self.set_fill_color(shade, shade - 4, shade - 10)
+            self.rect(0, i, 210, 4, "F")
+        self.set_fill_color(*self.ACCENT); self.rect(PAGE_L, 6, 1.5, 22, "F")
+        self.set_font(self.fn, "B", 21); self.set_text_color(*self.PRIMARY)
+        self.set_xy(lx + 6, 9); self.cell(avail - 6, 11, "RECHNUNG", 0, 0, "L")
+        self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
+        self.line(lx + 6, 22, PAGE_R, 22)
+        self.set_draw_color(*self.PRIMARY); self.set_line_width(0.2)
+        self.line(lx + 6, 23.5, PAGE_R, 23.5)
+        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx + 6, 25)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2 - 6, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_blueprint(self, lx):
+        avail = PAGE_R - lx
+        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 34, "F")
+        self.set_draw_color(20, 70, 130); self.set_line_width(0.15)
+        for xi in range(0, 215, 8):
+            self.line(xi, 0, xi, 34)
+        for yi in range(0, 36, 8):
+            self.line(0, yi, 210, yi)
+        self.set_draw_color(*self.ACCENT); self.set_line_width(0.5)
+        for cx, cy in [(PAGE_L, 4), (PAGE_R, 4), (PAGE_L, 30), (PAGE_R, 30)]:
+            self.line(cx - 3, cy, cx + 3, cy)
+            self.line(cx, cy - 3, cx, cy + 3)
+        self.set_font(self.fn, "B", 16); self.set_text_color(*self.HDR_TEXT)
+        self.set_xy(lx, 8); self.cell(avail, 10, "RECHNUNG", 0, 0, "R")
+        self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
+        self.line(lx, 21, PAGE_R, 21)
+        self.set_font(self.fn, "", 7); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx, 23)
+        self.cell(avail / 2, 5, f"// NR: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2, 5, f"DATE: {self.invoice_date} //", 0, 0, "R")
+
+    def _hdr_sakura(self, lx):
+        avail = PAGE_R - lx
+        self.set_fill_color(255, 240, 244); self.rect(0, 0, 210, 34, "F")
+        blossoms = [(18, 8, 5), (25, 15, 3.5), (14, 22, 4), (35, 6, 3),
+                    (PAGE_R - 10, 6, 4), (PAGE_R - 18, 18, 3), (PAGE_R - 5, 25, 2.5)]
+        for bx, by, br in blossoms:
+            self.set_fill_color(*self.ACCENT)
+            self.ellipse(bx, by, br * 2, br * 2, "F")
+            self.set_fill_color(255, 210, 220)
+            self.ellipse(bx + br * 0.3, by + br * 0.3, br, br, "F")
+        self.set_draw_color(*self.PRIMARY); self.set_line_width(1.5)
+        self.line(lx, 31, PAGE_R, 31)
+        self.set_draw_color(*self.ACCENT); self.set_line_width(0.4)
+        self.line(lx, 32.5, PAGE_R, 32.5)
+        self.set_font(self.fn, "B", 20); self.set_text_color(*self.PRIMARY)
+        self.set_xy(lx, 10); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
+        self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx, 23)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_carbon(self, lx):
+        avail = PAGE_R - lx
+        self.set_fill_color(28, 28, 28); self.rect(0, 0, 210, 32, "F")
+        self.set_draw_color(42, 42, 42); self.set_line_width(0.3)
+        for i in range(-5, 215, 6):
+            self.line(i, 0, i + 32, 32)
+        for i in range(-5, 215, 6):
+            self.line(i + 32, 0, i, 32)
+        self.set_fill_color(*self.ACCENT); self.rect(0, 29, 210, 3, "F")
+        self.set_font(self.fn, "B", 18); self.set_text_color(255, 255, 255)
+        self.set_xy(lx, 8); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
+        self.set_font(self.fn, "", 7.5); self.set_text_color(180, 180, 180)
+        self.set_xy(lx, 20)
+        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
+        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
+
+    def _hdr_swiss(self, lx):
+        avail = PAGE_R - lx
+        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 3.5, "F")
+        self.set_font(self.fn, "B", 28); self.set_text_color(*self.PRIMARY)
+        self.set_xy(lx, LOGO_Y); self.cell(avail, 14, "RECHNUNG", 0, 1, "R")
+        self.set_draw_color(15, 15, 15); self.set_line_width(1.8)
+        self.line(lx, LOGO_Y + 15, PAGE_R, LOGO_Y + 15)
+        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
+        self.set_xy(lx, LOGO_Y + 17)
+        self.cell(avail, 5, f"Nr: {self.invoice_number}   |   Datum: {self.invoice_date}", 0, 0, "R")
 
     # ── PAGE FOOTER ───────────────────────────────────────────────────────────
     def footer(self):
@@ -520,19 +756,19 @@ class PDFGenerator(FPDF):
             self.set_font(self.fn, "B", 7.2); self.cell(58, 3.8, "KONTAKT", 0, 1)
             self.set_font(self.fn, "", 7.2)
             for line in self._footer_contact:
-                self.set_x(PAGE_L); self.cell(58, 3.8, line, 0, 1)
+                self.set_x(PAGE_L); self.cell(58, 3.8, self._safe(line), 0, 1)
         if self._footer_bank:
             self.set_xy(76, y)
             self.set_font(self.fn, "B", 7.2); self.cell(58, 3.8, "BANK", 0, 1)
             self.set_font(self.fn, "", 7.2)
             for line in self._footer_bank:
-                self.set_x(76); self.cell(58, 3.8, line, 0, 1)
+                self.set_x(76); self.cell(58, 3.8, self._safe(line), 0, 1)
         if self._footer_tax:
             self.set_xy(136, y)
             self.set_font(self.fn, "B", 7.2); self.cell(59, 3.8, "STEUER", 0, 1, "R")
             self.set_font(self.fn, "", 7.2)
             for line in self._footer_tax:
-                self.set_x(136); self.cell(59, 3.8, line, 0, 1, "R")
+                self.set_x(136); self.cell(59, 3.8, self._safe(line), 0, 1, "R")
         self.set_xy(PAGE_L, -10)
         self.cell(0, 5, f"Seite {self.page_no()} von {{nb}}", 0, 0, "C")
 
@@ -540,51 +776,50 @@ class PDFGenerator(FPDF):
     def _add_address(self, sender, receiver):
         self.set_xy(PAGE_L, ADDR_Y)
         self.set_font(self.fn, "", 7); self.set_text_color(*self.TEXT_LIGHT)
-        al = sender.get('address', '').replace('\n', ' • ')
-        self.cell(0, 4, f"{sender.get('company_name','')} • {al}", 0, 1)
+        al = sender.get('address', '').replace('\n', ' - ')
+        self.cell(0, 4, self._safe(f"{sender.get('company_name','')} - {al}"), 0, 1)
         self.ln(1); self.set_x(PAGE_L)
         self.set_font(self.fn, "B", 10.5); self.set_text_color(*self.TEXT_MAIN)
         self.multi_cell(90, 5.8,
-            f"{receiver.get('customer_name','')}\n{receiver.get('customer_address','')}", 0, "L")
+            self._safe(f"{receiver.get('customer_name','')}\n{receiver.get('customer_address','')}"), 0, "L")
         for label, val in [
             ("Bauvorhaben",       receiver.get('Object')),
-            ("Ausführung",        receiver.get('aus')),
+            ("Ausfuehrung",       receiver.get('aus')),
             ("Leistungszeitraum", receiver.get('leistungszeitraum')),
         ]:
             if val and str(val).strip():
                 self.ln(2); self.set_x(PAGE_L)
                 self.set_font(self.fn, "B", 9); self.set_text_color(*self.PRIMARY)
-                self.cell(0, 5, f"{label}: {val}", 0, 1)
+                self.cell(0, 5, self._safe(f"{label}: {val}"), 0, 1)
         if receiver.get('leitweg_id'):
             self.ln(3); self.set_x(PAGE_L)
             self.set_font(self.fn, "B", 9); self.set_text_color(*self.ACCENT)
-            self.cell(0, 5, f"Leitweg-ID (E-Rechnung): {receiver['leitweg_id']}", 0, 1)
+            self.cell(0, 5, self._safe(f"Leitweg-ID (E-Rechnung): {receiver['leitweg_id']}"), 0, 1)
         if receiver.get('contract_ref') and str(receiver['contract_ref']).strip():
             self.ln(1); self.set_x(PAGE_L)
             self.set_font(self.fn, "", 8.5); self.set_text_color(*self.TEXT_LIGHT)
-            self.cell(0, 5, f"Vertragsnummer: {receiver['contract_ref']}", 0, 1)
+            self.cell(0, 5, self._safe(f"Vertragsnummer: {receiver['contract_ref']}"), 0, 1)
         if receiver.get('cost_center') and str(receiver['cost_center']).strip():
             self.set_x(PAGE_L)
             self.set_font(self.fn, "", 8.5); self.set_text_color(*self.TEXT_LIGHT)
-            self.cell(0, 5, f"Kostenstelle: {receiver['cost_center']}", 0, 1)
+            self.cell(0, 5, self._safe(f"Kostenstelle: {receiver['cost_center']}"), 0, 1)
 
     # ── Tabellen-Dispatch ─────────────────────────────────────────────────────
     _C_STD = [11, 87, 24, 28, 30]
     _C_SUN = [11, 95, 20, 26, 28]
-    _H     = ["POS", "BESCHREIBUNG", "MENGE", "EINZEL €", "SUMME €"]
     _A     = ["C", "L", "R", "R", "R"]
 
     def _add_table(self, items, inv):
         self.set_y(TABLE_Y)
         {
-            "classic":   self._tbl_classic,
-            "minimal":   self._tbl_minimal,
-            "bold":      self._tbl_bold,
-            "elegant":   self._tbl_elegant,
-            "corporate": self._tbl_corporate,
-            "sunset":    self._tbl_sunset,
-            "premium":   self._tbl_premium,
-            "bau":       self._tbl_bau,
+            "classic":    self._tbl_classic,
+            "minimal":    self._tbl_minimal,
+            "bold":       self._tbl_bold,
+            "elegant":    self._tbl_elegant,
+            "corporate":  self._tbl_corporate,
+            "sunset":     self._tbl_sunset,
+            "premium":    self._tbl_premium,
+            "bau":        self._tbl_bau,
             "rounded":    self._tbl_rounded,
             "pastel":     self._tbl_pastel,
             "neon":       self._tbl_neon,
@@ -601,7 +836,66 @@ class PDFGenerator(FPDF):
             "swiss":      self._tbl_swiss,
         }.get(self.layout, self._tbl_classic)(items, inv)
 
-    # ── Bestehende Tabellen ───────────────────────────────────────────────────
+    # ── Hilfs-Methoden ────────────────────────────────────────────────────────
+    def _hdr_row(self, C, h):
+        self.set_fill_color(*self.PRIMARY); self.set_text_color(*self.HDR_TEXT)
+        self.set_font(self.fn, "B", 8.5); self.set_x(PAGE_L)
+        for j, h2 in enumerate(self._H): self.cell(C[j], h, h2, 0, 0, self._A[j], True)
+        self.ln(h)
+
+    def _vals(self, idx, item):
+        u = item.get("unit", "")
+        return [str(idx),
+                self._safe(str(item.get("product_name", ""))),
+                f"{item.get('quantity', 0):.2f} {u}".strip(),
+                f"{item.get('unit_price', 0):.2f}",
+                f"{item.get('total_price', 0):.2f}"]
+
+    def _totals_right(self, inv):
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
+        if inv.get('discount_amount', 0):
+            rows.append((self._safe(f"Rabatt {inv.get('discount_percent', 0):.1f} %:"),
+                         f"-{inv['discount_amount']:.2f} {self.cur}"))
+        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
+        for lbl, val in rows:
+            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
+        self.ln(1); self.set_x(120)
+        self.set_fill_color(*self.TOTAL_BG); self.set_text_color(*self.TOTAL_TXT)
+        self.set_font(self.fn, "B", 11)
+        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R", True)
+
+    def _totals_rounded(self, inv):
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
+        if inv.get('discount_amount', 0):
+            rows.append((self._safe("Rabatt:"), f"-{inv['discount_amount']:.2f} {self.cur}"))
+        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
+        for lbl, val in rows:
+            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
+        self.ln(1)
+        self._shadow_rect(120, self.get_y(), 75, 12, 3)
+        self.set_fill_color(*self.TOTAL_BG)
+        self._rounded_rect(120, self.get_y(), 75, 12, 3, "F")
+        self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
+        self.set_xy(120, self.get_y())
+        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R")
+
+    def _totals_fullwidth(self, inv):
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
+        if inv.get('discount_amount', 0):
+            rows.append((self._safe(f"Rabatt {inv.get('discount_percent', 0):.1f} %:"),
+                         f"-{inv['discount_amount']:.2f} {self.cur}"))
+        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
+        for lbl, val in rows:
+            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
+        self.ln(2); self.set_x(PAGE_L)
+        self.set_fill_color(*self.TOTAL_BG); self.set_text_color(*self.TOTAL_TXT)
+        self.set_font(self.fn, "B", 13)
+        self.cell(PAGE_W, 13, f"GESAMTBETRAG:   {inv['total']:.2f} {self.cur}", 0, 1, "R", True)
+
+    # ── Tabellen ──────────────────────────────────────────────────────────────
     def _tbl_classic(self, items, inv):
         C = self._C_STD; self._hdr_row(C, 9)
         self.set_font(self.fn, "", 8.5)
@@ -672,9 +966,9 @@ class PDFGenerator(FPDF):
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j], True)
             self.ln(8)
             self.set_draw_color(192, 192, 192); self.set_line_width(0.14)
-            self.set_dash_pattern(dash=1.5, gap=1.5)
+            self._out("[1.5 1.5] 0 d")
             self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
-            self.set_dash_pattern(dash=0, gap=0)
+            self._out("[] 0 d")
         bot = self.get_y()
         self.set_draw_color(*self.PRIMARY); self.set_line_width(0.55)
         self.rect(PAGE_L, top, PAGE_W, bot - top); self.ln(5); self._totals_right(inv)
@@ -730,24 +1024,18 @@ class PDFGenerator(FPDF):
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y()); self.ln(4)
         self._totals_right(inv)
 
-    # ── Neue Tabellen ─────────────────────────────────────────────────────────
-
     def _tbl_rounded(self, items, inv):
-        """Rounded Card: abgerundete Kopf-Box, Card-Schatten pro Zeile."""
         C = self._C_STD
-        # Abgerundeter Header
         self._shadow_rect(PAGE_L, self.get_y(), PAGE_W, 10, 3, 1)
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(PAGE_L, self.get_y(), PAGE_W, 10, 3, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
-        y0 = self.get_y()
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 10, h, 0, 0, self._A[j])
         self.ln(10); self.ln(2)
         self.set_font(self.fn, "", 8.5)
         for i, item in enumerate(items, 1):
             y_row = self.get_y()
-            # Zeilen-Card mit Schatten
             self.set_fill_color(215, 222, 240)
             self._rounded_rect(PAGE_L + 0.8, y_row + 0.8, PAGE_W, 8, 2, "F")
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
@@ -755,15 +1043,12 @@ class PDFGenerator(FPDF):
             self._rounded_rect(PAGE_L, y_row, PAGE_W, 8, 2, "F")
             self.set_text_color(*self.TEXT_MAIN); self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j])
-            self.ln(10)  # Extra Abstand wegen Schatten
+            self.ln(10)
         self.ln(2)
-        # Abgerundeter Gesamt-Block
         self._totals_rounded(inv)
 
     def _tbl_pastel(self, items, inv):
-        """Soft Pastel: Pill-Badges als Positions-Nummern, sanfte Farben."""
         C = self._C_STD
-        # Header mit abgerundeten Ecken nur oben
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(PAGE_L, self.get_y(), PAGE_W, 9, 3, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
@@ -775,11 +1060,9 @@ class PDFGenerator(FPDF):
             y_row = self.get_y()
             bg = (255, 245, 254) if i % 2 else (255, 255, 255)
             self.set_fill_color(*bg); self.rect(PAGE_L, y_row, PAGE_W, 9, "F")
-            # Pill-Badge für Pos-Nummer
             self._pill_badge(PAGE_L + 0.5, y_row + 1.8, str(i), self.ACCENT, (255,255,255), 7)
             self.set_text_color(*self.TEXT_MAIN)
             vals = self._vals(i, item)
-            # Restliche Spalten
             self.set_xy(PAGE_L + C[0], y_row)
             for j in range(1, len(C)): self.cell(C[j], 9, vals[j], 0, 0, self._A[j])
             self.ln(11)
@@ -789,9 +1072,7 @@ class PDFGenerator(FPDF):
         self._totals_right(inv)
 
     def _tbl_neon(self, items, inv):
-        """Dark Neon: dunkle Zeilen, Neon-Linien als Trennungen."""
         C = self._C_STD
-        # Dunkle Header-Box
         self.set_fill_color(*self.PRIMARY); self.rect(PAGE_L, self.get_y(), PAGE_W, 10, "F")
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
@@ -807,18 +1088,16 @@ class PDFGenerator(FPDF):
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 9, v, 0, 0, self._A[j], True)
             self.ln(9)
-            # Neon-Trennlinie (dünn)
             r, g, b = self.ACCENT
             self.set_draw_color(r//3, g//3, b//3); self.set_line_width(0.2)
             self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         self.ln(4)
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y()); self.ln(4)
-        # Neon-Totals-Box
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} €")]
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
         if inv.get('discount_amount', 0):
-            rows.append((f"Rabatt:", f"−{inv['discount_amount']:.2f} €"))
+            rows.append((self._safe("Rabatt:"), f"-{inv['discount_amount']:.2f} {self.cur}"))
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_LIGHT)
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
@@ -827,14 +1106,11 @@ class PDFGenerator(FPDF):
         self._rounded_rect(120, self.get_y(), 75, 12, 3, "F")
         self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
         self.set_xy(120, self.get_y())
-        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} €  ", 0, 1, "R")
+        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R")
 
     def _tbl_rosegold(self, items, inv):
-        """Rose Gold: alternierende warme Töne, elegante Trennlinien."""
         C = self._C_STD
-        # Gradient-Header
-        steps = 10
-        w_step = PAGE_W / steps
+        steps = 10; w_step = PAGE_W / steps
         for i in range(steps):
             t = i / steps
             r = int(self.PRIMARY[0] + (self.ACCENT[0] - self.PRIMARY[0]) * t)
@@ -853,7 +1129,6 @@ class PDFGenerator(FPDF):
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j], True)
             self.ln(8)
-            # Dünne Gold-Trennlinie
             self.set_draw_color(212, 168, 140); self.set_line_width(0.2)
             self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         self.ln(4)
@@ -862,10 +1137,7 @@ class PDFGenerator(FPDF):
         self._totals_right(inv)
 
     def _tbl_slate(self, items, inv):
-        """Slate Clean: Außenrahmen abgerundet, linker Akzentbalken, sauber."""
-        C = self._C_STD
-        top_y = self.get_y()
-        # Abgerundeter Außenrahmen wird am Ende gezeichnet
+        C = self._C_STD; top_y = self.get_y()
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(PAGE_L, top_y, PAGE_W, 9, 3, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
@@ -873,7 +1145,6 @@ class PDFGenerator(FPDF):
         for j, h in enumerate(self._H): self.cell(C[j], 9, h, 0, 0, self._A[j])
         self.ln(9)
         self.set_font(self.fn, "", 8.5)
-        row_start = self.get_y()
         for i, item in enumerate(items, 1):
             y_row = self.get_y()
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
@@ -881,11 +1152,9 @@ class PDFGenerator(FPDF):
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j], True)
             self.ln(8)
-            # Linker Akzentbalken
             self.set_fill_color(*self.ACCENT)
             self.rect(PAGE_L, y_row, 2, 8, "F")
         bot_y = self.get_y()
-        # Äußerer abgerundeter Rahmen
         self.set_draw_color(*self.PRIMARY); self.set_line_width(0.5)
         self._rounded_rect(PAGE_L, top_y, PAGE_W, bot_y - top_y, 3)
         self.ln(4)
@@ -894,18 +1163,12 @@ class PDFGenerator(FPDF):
         self._totals_right(inv)
 
     def _tbl_type(self, items, inv):
-        """Typewriter: Doppelrahmen, gestrichelte Trennlinien, Vintage."""
-        C = self._C_STD
-        top_y = self.get_y()
-        # Äußerer + innerer Rahmen
-        self.set_draw_color(*self.PRIMARY); self.set_line_width(0.9)
-        # Header-Hintergrund
+        C = self._C_STD; top_y = self.get_y()
         self.set_fill_color(*self.PRIMARY); self.rect(PAGE_L, top_y, PAGE_W, 9, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 9, h, 0, 0, self._A[j])
         self.ln(9)
-        # Doppellinie nach Header
         self.set_draw_color(*self.PRIMARY); self.set_line_width(0.7)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         self.set_line_width(0.25)
@@ -919,11 +1182,10 @@ class PDFGenerator(FPDF):
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j], True)
             self.ln(8)
             self.set_draw_color(*self.TEXT_LIGHT); self.set_line_width(0.15)
-            self.set_dash_pattern(dash=2, gap=2)
+            self._out("[2 2] 0 d")
             self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
-            self.set_dash_pattern(dash=0, gap=0)
+            self._out("[] 0 d")
         bot_y = self.get_y()
-        # Abschließender Doppelrahmen
         self.set_draw_color(*self.PRIMARY); self.set_line_width(0.7)
         self.line(PAGE_L, bot_y, PAGE_R, bot_y)
         self.set_line_width(0.25)
@@ -931,262 +1193,8 @@ class PDFGenerator(FPDF):
         self.ln(6)
         self._totals_right(inv)
 
-    # ── Hilfs-Methoden ────────────────────────────────────────────────────────
-    def _hdr_row(self, C, h):
-        self.set_fill_color(*self.PRIMARY); self.set_text_color(*self.HDR_TEXT)
-        self.set_font(self.fn, "B", 8.5); self.set_x(PAGE_L)
-        for j, h2 in enumerate(self._H): self.cell(C[j], h, h2, 0, 0, self._A[j], True)
-        self.ln(h)
-
-    def _vals(self, idx, item):
-        u = item.get("unit", "")
-        return [str(idx), str(item.get("product_name","")),
-                f"{item.get('quantity',0):.2f} {u}".strip(),
-                f"{item.get('unit_price',0):.2f}",
-                f"{item.get('total_price',0):.2f}"]
-
-    def _totals_right(self, inv):
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} \u20ac"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} \u20ac")]
-        if inv.get('discount_amount', 0):
-            rows.append((f"Rabatt {inv.get('discount_percent',0):.1f} %:",
-                         f"\u2212{inv['discount_amount']:.2f} \u20ac"))
-        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
-        for lbl, val in rows:
-            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
-        self.ln(1); self.set_x(120)
-        self.set_fill_color(*self.TOTAL_BG); self.set_text_color(*self.TOTAL_TXT)
-        self.set_font(self.fn, "B", 11)
-        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} \u20ac  ", 0, 1, "R", True)
-
-    def _totals_rounded(self, inv):
-        """Totals-Block mit abgerundeter Gesamt-Box."""
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} \u20ac"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} \u20ac")]
-        if inv.get('discount_amount', 0):
-            rows.append((f"Rabatt:", f"\u2212{inv['discount_amount']:.2f} \u20ac"))
-        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
-        for lbl, val in rows:
-            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
-        self.ln(1)
-        # Schatten + abgerundete Total-Box
-        self._shadow_rect(120, self.get_y(), 75, 12, 3)
-        self.set_fill_color(*self.TOTAL_BG)
-        self._rounded_rect(120, self.get_y(), 75, 12, 3, "F")
-        self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
-        self.set_xy(120, self.get_y())
-        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} \u20ac  ", 0, 1, "R")
-
-    def _totals_fullwidth(self, inv):
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} \u20ac"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} \u20ac")]
-        if inv.get('discount_amount', 0):
-            rows.append((f"Rabatt {inv.get('discount_percent',0):.1f} %:",
-                         f"\u2212{inv['discount_amount']:.2f} \u20ac"))
-        self.set_font(self.fn, "", 9.5); self.set_text_color(*self.TEXT_MAIN)
-        for lbl, val in rows:
-            self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
-        self.ln(2); self.set_x(PAGE_L)
-        self.set_fill_color(*self.TOTAL_BG); self.set_text_color(*self.TOTAL_TXT)
-        self.set_font(self.fn, "B", 13)
-        self.cell(PAGE_W, 13, f"GESAMTBETRAG:   {inv['total']:.2f} \u20ac", 0, 1, "R", True)
-
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # NEUE HEADER  v15.1
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    def _hdr_arctic(self, lx):
-        """Arctic Frost: Eisblau, diagonale Akzentecke oben rechts."""
-        avail = PAGE_R - lx
-        # Hauptband
-        self.set_fill_color(*self.PRIMARY)
-        self.rect(lx, 0, avail + 15, 30, "F")
-        # Helles Dreieck oben-rechts (Eiscrystal-Effekt)
-        self.set_fill_color(*self.ACCENT)
-        self.set_draw_color(*self.ACCENT)
-        # Diagonal-Streifen
-        for i, alpha in [(0, 60), (6, 100), (12, 140)]:
-            r = int(self.ACCENT[0] * alpha // 255 + self.PRIMARY[0] * (255 - alpha) // 255)
-            g = int(self.ACCENT[1] * alpha // 255 + self.PRIMARY[1] * (255 - alpha) // 255)
-            b = int(self.ACCENT[2] * alpha // 255 + self.PRIMARY[2] * (255 - alpha) // 255)
-            self.set_fill_color(r, g, b)
-            self.set_draw_color(r, g, b)
-            self.move_to(PAGE_R - 30 + i, 0)
-            self.line_to(PAGE_R + 15, 0)
-            self.line_to(PAGE_R + 15, 30 - i * 2)
-            self._out("f")
-        self.set_font(self.fn, "B", 19); self.set_text_color(255, 255, 255)
-        self.set_xy(lx + 6, 7); self.cell(avail - 40, 10, "RECHNUNG", 0, 0, "L")
-        # Untere Linie mit Akzentfarbe
-        self.set_draw_color(*self.ACCENT); self.set_line_width(1.2)
-        self.line(lx, 30, PAGE_R, 30)
-        self.set_font(self.fn, "", 7.5); self.set_text_color(200, 235, 255)
-        self.set_xy(lx + 6, 21)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_zen(self, lx):
-        """Forest Zen: natürlich, Bambus-Striche, viel Weißraum."""
-        avail = PAGE_R - lx
-        # Feiner Strich ganz oben
-        self.set_draw_color(*self.PRIMARY); self.set_line_width(2.5)
-        self.line(0, 0, 210, 0)
-        # Dünne vertikale Bambus-Linien links
-        self.set_line_width(0.4)
-        for xi in [5, 8, 10.5]:
-            self.set_draw_color(*self.ACCENT)
-            self.line(xi, 2, xi, 34)
-        self.set_font(self.fn, "B", 22); self.set_text_color(*self.PRIMARY)
-        self.set_xy(lx, LOGO_Y + 2); self.cell(avail, 11, "RECHNUNG", 0, 1, "R")
-        # Subtile Linie
-        self.set_draw_color(*self.ACCENT); self.set_line_width(0.6)
-        self.line(lx, LOGO_Y + 14, PAGE_R, LOGO_Y + 14)
-        # Kleiner grüner Punkt als Deko
-        self.set_fill_color(*self.ACCENT)
-        self.ellipse(lx - 0.5, LOGO_Y + 12, 4, 4, "F")
-        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx + 6, LOGO_Y + 16)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2 - 6, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_midnight(self, lx):
-        """Midnight Purple: dunkles Vollband, Neon-Glow Linie."""
-        # Ganzseitiger dunkler Hintergrund
-        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 33, "F")
-        avail = PAGE_R - lx
-        # Glow-Effekt: mehrere Linien übereinander
-        for w, alpha in [(2.5, 40), (1.2, 100), (0.5, 200)]:
-            r = int(self.ACCENT[0] * alpha // 255 + 255 * (255 - alpha) // 255)
-            g = int(self.ACCENT[1] * alpha // 255)
-            b = int(self.ACCENT[2] * alpha // 255)
-            self.set_draw_color(min(255, self.ACCENT[0]), min(255, self.ACCENT[1]), min(255, self.ACCENT[2]))
-            self.set_line_width(w)
-            self.line(lx, 32, PAGE_R, 32)
-        self.set_font(self.fn, "B", 20); self.set_text_color(*self.ACCENT)
-        self.set_xy(lx, 8); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
-        self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx, 22)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_linen(self, lx):
-        """Warm Linen: beige Textur-Simulation, warme Typografie."""
-        avail = PAGE_R - lx
-        # Beige-Streifen als Papier-Simulation
-        for i in range(0, 32, 4):
-            shade = 248 - (i % 8)
-            self.set_fill_color(shade, shade - 4, shade - 10)
-            self.rect(0, i, 210, 4, "F")
-        # Akzentlinie links
-        self.set_fill_color(*self.ACCENT); self.rect(PAGE_L, 6, 1.5, 22, "F")
-        self.set_font(self.fn, "B", 21); self.set_text_color(*self.PRIMARY)
-        self.set_xy(lx + 6, 9); self.cell(avail - 6, 11, "RECHNUNG", 0, 0, "L")
-        # Serifen-Style Trennlinie
-        self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
-        self.line(lx + 6, 22, PAGE_R, 22)
-        self.set_draw_color(*self.PRIMARY); self.set_line_width(0.2)
-        self.line(lx + 6, 23.5, PAGE_R, 23.5)
-        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx + 6, 25)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2 - 6, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_blueprint(self, lx):
-        """Tech Blueprint: Blaupausen-Style, Rasterlinien, technisch."""
-        avail = PAGE_R - lx
-        # Dunkler Hintergrund
-        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 34, "F")
-        # Raster-Linien (Blaupause)
-        self.set_draw_color(20, 70, 130); self.set_line_width(0.15)
-        for xi in range(0, 215, 8):
-            self.line(xi, 0, xi, 34)
-        for yi in range(0, 36, 8):
-            self.line(0, yi, 210, yi)
-        # Fadenkreuz-Ecken
-        self.set_draw_color(*self.ACCENT); self.set_line_width(0.5)
-        for cx, cy in [(PAGE_L, 4), (PAGE_R, 4), (PAGE_L, 30), (PAGE_R, 30)]:
-            self.line(cx - 3, cy, cx + 3, cy)
-            self.line(cx, cy - 3, cx, cy + 3)
-        # Text
-        self.set_font(self.fn, "B", 16); self.set_text_color(*self.HDR_TEXT)
-        self.set_xy(lx, 8); self.cell(avail, 10, "RECHNUNG", 0, 0, "R")
-        self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
-        self.line(lx, 21, PAGE_R, 21)
-        self.set_font(self.fn, "", 7); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx, 23)
-        self.cell(avail / 2, 5, f"// NR: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2, 5, f"DATE: {self.invoice_date} //", 0, 0, "R")
-
-    def _hdr_sakura(self, lx):
-        """Sakura: japanisch-inspiriert, Kirschblüten-Kreise als Deko."""
-        avail = PAGE_R - lx
-        # Sanfter rosa Hintergrund
-        self.set_fill_color(255, 240, 244); self.rect(0, 0, 210, 34, "F")
-        # Kirschblüten: kleine Kreise
-        blossoms = [(18, 8, 5), (25, 15, 3.5), (14, 22, 4), (35, 6, 3),
-                    (PAGE_R - 10, 6, 4), (PAGE_R - 18, 18, 3), (PAGE_R - 5, 25, 2.5)]
-        for bx, by, br in blossoms:
-            self.set_fill_color(*self.ACCENT)
-            self.ellipse(bx, by, br * 2, br * 2, "F")
-            self.set_fill_color(255, 210, 220)
-            self.ellipse(bx + br * 0.3, by + br * 0.3, br, br, "F")
-        # Hauptlinie
-        self.set_draw_color(*self.PRIMARY); self.set_line_width(1.5)
-        self.line(lx, 31, PAGE_R, 31)
-        self.set_draw_color(*self.ACCENT); self.set_line_width(0.4)
-        self.line(lx, 32.5, PAGE_R, 32.5)
-        self.set_font(self.fn, "B", 20); self.set_text_color(*self.PRIMARY)
-        self.set_xy(lx, 10); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
-        self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx, 23)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_carbon(self, lx):
-        """Carbon: Carbon-Fiber-Look, Rot-Akzent, sportlich."""
-        avail = PAGE_R - lx
-        # Carbon-Textur: diagonale Streifen
-        self.set_fill_color(28, 28, 28); self.rect(0, 0, 210, 32, "F")
-        self.set_draw_color(42, 42, 42); self.set_line_width(0.3)
-        for i in range(-5, 215, 6):
-            self.line(i, 0, i + 32, 32)
-        for i in range(-5, 215, 6):
-            self.line(i + 32, 0, i, 32)
-        # Roter Akzentbalken unten
-        self.set_fill_color(*self.ACCENT); self.rect(0, 29, 210, 3, "F")
-        # Text
-        self.set_font(self.fn, "B", 18); self.set_text_color(255, 255, 255)
-        self.set_xy(lx, 8); self.cell(avail, 11, "RECHNUNG", 0, 0, "R")
-        self.set_font(self.fn, "", 7.5); self.set_text_color(180, 180, 180)
-        self.set_xy(lx, 20)
-        self.cell(avail / 2, 5, f"Nr: {self.invoice_number}", 0, 0, "L")
-        self.cell(avail / 2, 5, f"Datum: {self.invoice_date}", 0, 0, "R")
-
-    def _hdr_swiss(self, lx):
-        """Swiss Precision: minimalistisch, Rot-Weiß, klare Typografie."""
-        avail = PAGE_R - lx
-        # Nur ein Roter Balken ganz oben
-        self.set_fill_color(*self.PRIMARY); self.rect(0, 0, 210, 3.5, "F")
-        # RECHNUNG groß, schwarz
-        self.set_font(self.fn, "B", 28); self.set_text_color(*self.PRIMARY)
-        self.set_xy(lx, LOGO_Y); self.cell(avail, 14, "RECHNUNG", 0, 1, "R")
-        # Dicke schwarze Linie
-        self.set_draw_color(15, 15, 15); self.set_line_width(1.8)
-        self.line(lx, LOGO_Y + 15, PAGE_R, LOGO_Y + 15)
-        # Meta rechts-bündig, klein
-        self.set_font(self.fn, "", 8); self.set_text_color(*self.TEXT_LIGHT)
-        self.set_xy(lx, LOGO_Y + 17)
-        self.cell(avail, 5, f"Nr: {self.invoice_number}   |   Datum: {self.invoice_date}", 0, 0, "R")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # NEUE TABELLEN  v15.1
-    # ═══════════════════════════════════════════════════════════════════════════
-
     def _tbl_arctic(self, items, inv):
-        """Arctic Frost: Eisblaue Zeilen mit weißem Rand, abgerundeter Gesamt-Box."""
         C = self._C_STD
-        # Header: abgerundet oben
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(PAGE_L, self.get_y(), PAGE_W, 10, 4, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
@@ -1196,7 +1204,6 @@ class PDFGenerator(FPDF):
         self.set_font(self.fn, "", 8.5)
         for i, item in enumerate(items, 1):
             y_row = self.get_y()
-            # Jede Zeile als eigene kleine Card mit Rand
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
             self.set_fill_color(*bg)
             self._rounded_rect(PAGE_L, y_row, PAGE_W, 8.5, 2, "F")
@@ -1209,9 +1216,7 @@ class PDFGenerator(FPDF):
         self._totals_rounded(inv)
 
     def _tbl_zen(self, items, inv):
-        """Forest Zen: keine harten Ränder, nur Trennlinien, viel Luft."""
         C = self._C_STD
-        # Header: nur Unterstreichung, kein Hintergrund
         self.set_font(self.fn, "B", 8); self.set_text_color(*self.PRIMARY)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 8, h.upper(), 0, 0, self._A[j])
@@ -1221,31 +1226,25 @@ class PDFGenerator(FPDF):
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for i, item in enumerate(items, 1):
             self.set_x(PAGE_L)
-            # Kleines Natur-Symbol als Pos-Indikator
             self.set_text_color(*self.ACCENT)
-            self.cell(C[0], 10, "●", 0, 0, "C")
+            self.cell(C[0], 10, ">>", 0, 0, "C")
             self.set_text_color(*self.TEXT_MAIN)
             vals = self._vals(i, item)
             for j in range(1, len(C)): self.cell(C[j], 10, vals[j], 0, 0, self._A[j])
             self.ln(10)
-            # Gestrichelte, sehr helle Linie
             self.set_draw_color(180, 210, 170); self.set_line_width(0.2)
-            self.set_dash_pattern(dash=3, gap=2)
+            self._out("[3 2] 0 d")
             self.line(PAGE_L + 15, self.get_y(), PAGE_R, self.get_y())
-            self.set_dash_pattern(dash=0, gap=0)
+            self._out("[] 0 d")
         self.ln(4)
         self.set_draw_color(*self.PRIMARY); self.set_line_width(1.0)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y()); self.ln(4)
         self._totals_right(inv)
 
     def _tbl_midnight(self, items, inv):
-        """Midnight Purple: dunkle Tabellenzeilen, leuchtende Pos-Circles."""
         C = self._C_STD
-        # Äußere abgerundete Box
-        top_y = self.get_y()
-        # Header
         self.set_fill_color(*self.BG_SOFT)
-        self._rounded_rect(PAGE_L, top_y, PAGE_W, 10, 4, "F")
+        self._rounded_rect(PAGE_L, self.get_y(), PAGE_W, 10, 4, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.ACCENT)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 10, h, 0, 0, self._A[j])
@@ -1255,7 +1254,6 @@ class PDFGenerator(FPDF):
             y_row = self.get_y()
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
             self.set_fill_color(*bg); self.rect(PAGE_L, y_row, PAGE_W, 9, "F")
-            # Leuchtender Circle für Pos-Nummer
             self.set_fill_color(*self.ACCENT)
             self.ellipse(PAGE_L + 1, y_row + 1.5, 7, 6, "F")
             self.set_font(self.fn, "B", 7); self.set_text_color(*self.BG_ALT)
@@ -1267,38 +1265,31 @@ class PDFGenerator(FPDF):
             for j in range(1, len(C)): self.cell(C[j], 9, vals[j], 0, 0, self._A[j])
             self.ln(11)
         self.ln(2)
-        # Abgerundete Total-Box mit Akzent-Hintergrund
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} €")]
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
-        self.ln(1); self.set_x(120)
+        self.ln(1)
         self.set_fill_color(*self.TOTAL_BG)
         self._rounded_rect(120, self.get_y(), 75, 12, 6, "F")
         self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
         self.set_xy(120, self.get_y())
-        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} €  ", 0, 1, "R")
+        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R")
 
     def _tbl_linen(self, items, inv):
-        """Warm Linen: warme Töne, vertikale Spaltenlinien, gemütlich."""
-        C = self._C_STD
-        top_y = self.get_y()
-        # Warmer Header
-        self.set_fill_color(*self.PRIMARY)
-        self.rect(PAGE_L, top_y, PAGE_W, 9, "F")
+        C = self._C_STD; top_y = self.get_y()
+        self.set_fill_color(*self.PRIMARY); self.rect(PAGE_L, top_y, PAGE_W, 9, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 9, h, 0, 0, self._A[j])
         self.ln(9)
-        # Doppellinie nach Header
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.6)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         self.set_draw_color(220, 190, 150); self.set_line_width(0.2)
         self.line(PAGE_L, self.get_y() + 1.2, PAGE_R, self.get_y() + 1.2)
         self.ln(2)
-        self.set_font(self.fn, "", 8.5)
-        row_start = self.get_y()
+        self.set_font(self.fn, "", 8.5); row_start = self.get_y()
         for i, item in enumerate(items, 1):
             y_row = self.get_y()
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
@@ -1307,7 +1298,6 @@ class PDFGenerator(FPDF):
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 8, v, 0, 0, self._A[j], True)
             self.ln(8)
         row_end = self.get_y()
-        # Vertikale Spaltenlinien
         self.set_draw_color(200, 170, 130); self.set_line_width(0.2)
         x = PAGE_L
         for j in range(len(C) - 1):
@@ -1318,11 +1308,7 @@ class PDFGenerator(FPDF):
         self.ln(5); self._totals_right(inv)
 
     def _tbl_blueprint(self, items, inv):
-        """Tech Blueprint: dunkle Tabelle, Cyan-Akzente, technische Optik."""
-        C = self._C_STD
-        # Dunkler Hintergrundblock für Tabelle
-        top_y = self.get_y()
-        # Header
+        C = self._C_STD; top_y = self.get_y()
         self.set_fill_color(*self.BG_SOFT); self.rect(PAGE_L, top_y, PAGE_W, 10, "F")
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
         self.line(PAGE_L, top_y, PAGE_R, top_y)
@@ -1333,38 +1319,33 @@ class PDFGenerator(FPDF):
         self.ln(10)
         self.set_font(self.fn, "", 8.5)
         for i, item in enumerate(items, 1):
-            y_row = self.get_y()
             bg = self.BG_SOFT if i % 2 else self.BG_ALT
             self.set_fill_color(*bg); self.set_text_color(*self.TEXT_MAIN)
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 9, v, 0, 0, self._A[j], True)
             self.ln(9)
-            # Cyan-Linie
             self.set_draw_color(*self.ACCENT); self.set_line_width(0.15)
             self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         bot_y = self.get_y()
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.8)
         self.line(PAGE_L, bot_y, PAGE_R, bot_y)
         self.ln(5)
-        # Tech-Totals mit Rahmen
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} €")]
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
-        self.ln(1); self.set_x(120)
+        self.ln(1)
         self.set_fill_color(*self.TOTAL_BG)
         self._rounded_rect(120, self.get_y(), 75, 12, 3, "F")
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.6)
         self._rounded_rect(120, self.get_y(), 75, 12, 3)
         self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
         self.set_xy(120, self.get_y())
-        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} €  ", 0, 1, "R")
+        self.cell(75, 12, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R")
 
     def _tbl_sakura(self, items, inv):
-        """Sakura: runde Zeilen-Cards mit Rosa-Tönen, Kirschblüten-Akzente."""
         C = self._C_STD
-        # Abgerundeter Header
         self.set_fill_color(*self.PRIMARY)
         self._rounded_rect(PAGE_L, self.get_y(), PAGE_W, 10, 5, "F")
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
@@ -1374,19 +1355,16 @@ class PDFGenerator(FPDF):
         self.set_font(self.fn, "", 8.5)
         for i, item in enumerate(items, 1):
             y_row = self.get_y()
-            # Sanfte Card
             self.set_fill_color(*(self.BG_SOFT if i % 2 else self.BG_ALT))
             self._rounded_rect(PAGE_L, y_row, PAGE_W, 9, 3, "F")
-            # Kleines Blüten-Ornament
             self.set_fill_color(*self.ACCENT)
             self.ellipse(PAGE_L + 2, y_row + 3, 3, 3, "F")
             self.set_text_color(*self.TEXT_MAIN); self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 9, v, 0, 0, self._A[j])
             self.ln(12)
         self.ln(2)
-        # Totals in rosa abgerundeter Box
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} €")]
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
@@ -1395,22 +1373,18 @@ class PDFGenerator(FPDF):
         self._rounded_rect(120, self.get_y(), 75, 13, 6, "F")
         self.set_font(self.fn, "B", 11); self.set_text_color(*self.TOTAL_TXT)
         self.set_xy(120, self.get_y())
-        self.cell(75, 13, f"  GESAMT: {inv['total']:.2f} €  ", 0, 1, "R")
+        self.cell(75, 13, f"  GESAMT: {inv['total']:.2f} {self.cur}  ", 0, 1, "R")
 
     def _tbl_carbon(self, items, inv):
-        """Carbon: dunkle Zeilen, roter Highlight-Streifen, sportlich."""
         C = self._C_STD
-        # Carbon-Header
         self.set_fill_color(*self.PRIMARY); self.rect(PAGE_L, self.get_y(), PAGE_W, 11, "F")
         self.set_draw_color(*self.ACCENT); self.set_line_width(0.25)
-        # Diagonale Header-Textur
         for xi in range(int(PAGE_L), int(PAGE_R), 4):
             self.line(xi, self.get_y(), xi + 11, self.get_y() + 11)
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.HDR_TEXT)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 11, h, 0, 0, self._A[j])
         self.ln(11)
-        # Roter Trennstreifen
         self.set_fill_color(*self.ACCENT); self.rect(PAGE_L, self.get_y(), PAGE_W, 2, "F")
         self.ln(3)
         self.set_font(self.fn, "", 8.5)
@@ -1420,13 +1394,11 @@ class PDFGenerator(FPDF):
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 9, v, 0, 0, self._A[j], True)
             self.ln(9)
-        # Roter Abschlussstreifen
         self.set_fill_color(*self.ACCENT); self.rect(PAGE_L, self.get_y(), PAGE_W, 2, "F")
         self.ln(6)
-        # Total: voll breite dunkle Box mit rotem Rand
+        rows = [(self._safe("Nettobetrag:"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %:"), f"{inv['tax_amount']:.2f} {self.cur}")]
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
-        rows = [("Nettobetrag:", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %:", f"{inv['tax_amount']:.2f} €")]
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R"); self.cell(30, 7, val, 0, 1, "R")
         self.ln(2); self.set_x(PAGE_L)
@@ -1435,57 +1407,48 @@ class PDFGenerator(FPDF):
         self.set_fill_color(*self.ACCENT); self.rect(PAGE_R - 3, self.get_y(), 3, 13, "F")
         self.set_font(self.fn, "B", 13); self.set_text_color(*self.TOTAL_TXT)
         self.set_x(PAGE_L)
-        self.cell(PAGE_W, 13, f"GESAMT:   {inv['total']:.2f} €", 0, 1, "R", False)
+        self.cell(PAGE_W, 13, f"GESAMT:   {inv['total']:.2f} {self.cur}", 0, 1, "R", False)
 
     def _tbl_swiss(self, items, inv):
-        """Swiss Precision: nur schwarze Linien, maximale Klarheit."""
-        C = self._C_STD
-        top_y = self.get_y()
-        # Dicke Kopflinie
+        C = self._C_STD; top_y = self.get_y()
         self.set_draw_color(*self.PRIMARY); self.set_line_width(1.5)
         self.line(PAGE_L, top_y, PAGE_R, top_y)
-        # Header: kein Hintergrund, nur Text
         self.set_font(self.fn, "B", 8.5); self.set_text_color(*self.PRIMARY)
         self.set_x(PAGE_L)
         for j, h in enumerate(self._H): self.cell(C[j], 9, h, 0, 0, self._A[j])
         self.ln(9)
-        # Dünne Linie
         self.set_line_width(0.5)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y()); self.ln(1)
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for i, item in enumerate(items, 1):
-            # Jede 2. Zeile: heller Hintergrund
             if i % 2 == 0:
                 self.set_fill_color(*self.BG_SOFT)
                 self.rect(PAGE_L, self.get_y(), PAGE_W, 9, "F")
             self.set_x(PAGE_L)
             for j, v in enumerate(self._vals(i, item)): self.cell(C[j], 9, v, 0, 0, self._A[j])
             self.ln(9)
-        # Dicke Schlusslinie
         self.set_line_width(1.5); self.set_draw_color(*self.PRIMARY)
         self.line(PAGE_L, self.get_y(), PAGE_R, self.get_y())
         self.ln(6)
-        # Totals: Swiss-style rechts, Gesamt in Rot
-        rows = [("Nettobetrag", f"{inv['subtotal']:.2f} €"),
-                (f"MwSt. {inv['tax_rate']} %", f"{inv['tax_amount']:.2f} €")]
+        rows = [(self._safe("Nettobetrag"),           f"{inv['subtotal']:.2f} {self.cur}"),
+                (self._safe(f"MwSt. {inv['tax_rate']} %"), f"{inv['tax_amount']:.2f} {self.cur}")]
         self.set_font(self.fn, "", 9); self.set_text_color(*self.TEXT_MAIN)
         for lbl, val in rows:
             self.set_x(120); self.cell(45, 7, lbl, 0, 0, "R")
             self.cell(30, 7, val, 0, 1, "R")
-        # Rote Gesamt-Zeile
         self.set_draw_color(*self.PRIMARY); self.set_line_width(1.2)
         self.line(120, self.get_y(), PAGE_R, self.get_y())
         self.ln(2); self.set_x(120)
         self.set_font(self.fn, "B", 12); self.set_text_color(*self.PRIMARY)
         self.cell(45, 8, "GESAMT", 0, 0, "R")
-        self.cell(30, 8, f"{inv['total']:.2f} €", 0, 1, "R")
+        self.cell(30, 8, f"{inv['total']:.2f} {self.cur}", 0, 1, "R")
         self.set_draw_color(*self.PRIMARY); self.set_line_width(1.2)
         self.line(120, self.get_y(), PAGE_R, self.get_y())
 
     # ── Haupt-Einstieg ────────────────────────────────────────────────────────
     def generate_invoice(self, invoice_data, receiver_data, items, sender_data):
         self.invoice_number = invoice_data.get("invoice_number", "---")
-        self.invoice_date   = invoice_data.get("invoice_date", "---")
+        self.invoice_date   = invoice_data.get("invoice_date",   "---")
         self._footer_contact = _lines(
             ("Tel",  sender_data.get("phone",  "")),
             ("Mail", sender_data.get("email",  "")),
@@ -1505,78 +1468,102 @@ class PDFGenerator(FPDF):
         self._add_address(sender_data, receiver_data)
         self._add_table(items, invoice_data)
         closing = invoice_data.get("payment_terms",
-            "Zahlbar sofort nach Erhalt ohne Abzug. Vielen Dank für Ihren Auftrag!")
+            "Zahlbar sofort nach Erhalt ohne Abzug. Vielen Dank fuer Ihren Auftrag!")
         self.ln(10); self.set_x(PAGE_L)
         self.set_font(self.fn, "", 8.5); self.set_text_color(*self.TEXT_MAIN)
-        self.multi_cell(0, 5, closing, 0, "L")
+        self.multi_cell(0, 5, self._safe(closing), 0, "L")
         if invoice_data.get("notes") and str(invoice_data["notes"]).strip():
             self.ln(4); self.set_x(PAGE_L)
             self.set_font(self.fn, "", 7.5); self.set_text_color(*self.TEXT_LIGHT)
-            self.multi_cell(0, 4.5, invoice_data["notes"], 0, "L")
-        pdf_raw  = self.output()
+            self.multi_cell(0, 4.5, self._safe(invoice_data["notes"]), 0, "L")
+        raw = self.output(dest='S')
+        pdf_raw = raw.encode('latin-1') if isinstance(raw, str) else raw
         xml_data = self._build_xml(invoice_data, receiver_data, items, sender_data)
-        return self._embed_xml(pdf_raw, xml_data), xml_data
+        return self._embed_xml(pdf_raw, xml_data, invoice_data), xml_data
 
-    # ── EN 16931 XML ──────────────────────────────────────────────────────────
+    # ── EN 16931 / ZUGFeRD 2.3.3 XML ─────────────────────────────────────────
     def _build_xml(self, invoice_data, receiver_data, items, sender_data):
         RSM = "urn:un:unece:uncefact:data:standard:CrossIndustryInvoice:100"
         RAM = "urn:un:unece:uncefact:data:standard:ReusableAggregateBusinessInformationEntity:100"
         UDT = "urn:un:unece:uncefact:data:standard:UnqualifiedDataType:100"
-        ET.register_namespace('rsm', RSM); ET.register_namespace('ram', RAM); ET.register_namespace('udt', UDT)
+        ET.register_namespace('rsm', RSM)
+        ET.register_namespace('ram', RAM)
+        ET.register_namespace('udt', UDT)
+
         root = ET.Element(f"{{{RSM}}}CrossIndustryInvoice")
+
         ctx = ET.SubElement(root, f"{{{RSM}}}ExchangedDocumentContext")
         gp  = ET.SubElement(ctx, f"{{{RAM}}}GuidelineSpecifiedDocumentContextParameter")
-        ET.SubElement(gp, f"{{{RAM}}}ID").text = "urn:cen.eu:en16931:2017#compliant#urn:factur-x.eu:1p0:basic"
+        ET.SubElement(gp, f"{{{RAM}}}ID").text = ZUGFERD_GUIDELINE
+
         hdr = ET.SubElement(root, f"{{{RSM}}}ExchangedDocument")
-        ET.SubElement(hdr, f"{{{RAM}}}ID").text      = str(invoice_data.get("invoice_number",""))
+        ET.SubElement(hdr, f"{{{RAM}}}ID").text       = str(invoice_data.get("invoice_number", ""))
         ET.SubElement(hdr, f"{{{RAM}}}TypeCode").text = "380"
         idt = ET.SubElement(hdr, f"{{{RAM}}}IssueDateTime")
         dt  = datetime.strptime(invoice_data.get("invoice_date"), "%d.%m.%Y")
         ET.SubElement(idt, f"{{{UDT}}}DateTimeString", format="102").text = dt.strftime("%Y%m%d")
+
         txn = ET.SubElement(root, f"{{{RSM}}}SupplyChainTradeTransaction")
+
         for i, item in enumerate(items, 1):
             li   = ET.SubElement(txn, f"{{{RAM}}}IncludedSupplyChainTradeLineItem")
             ldoc = ET.SubElement(li,  f"{{{RAM}}}AssociatedDocumentLineDocument")
             ET.SubElement(ldoc, f"{{{RAM}}}LineID").text = str(i)
             prod = ET.SubElement(li,  f"{{{RAM}}}SpecifiedTradeProduct")
-            ET.SubElement(prod, f"{{{RAM}}}Name").text = item.get("product_name","")
-            agr   = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeAgreement")
-            price = ET.SubElement(agr, f"{{{RAM}}}NetPriceProductTradePrice")
-            ET.SubElement(price, f"{{{RAM}}}ChargeAmount").text = f"{item.get('unit_price',0):.2f}"
-            delv  = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeDelivery")
-            ET.SubElement(delv, f"{{{RAM}}}BilledQuantity", unitCode=item.get("unit_code","C62")).text = f"{item.get('quantity',0):.2f}"
-            sett  = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeSettlement")
-            ltax  = ET.SubElement(sett, f"{{{RAM}}}ApplicableTradeTax")
-            tr    = float(invoice_data.get("tax_rate", 19))
+            ET.SubElement(prod, f"{{{RAM}}}Name").text = item.get("product_name", "")
+            agr_li = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeAgreement")
+            price  = ET.SubElement(agr_li, f"{{{RAM}}}NetPriceProductTradePrice")
+            ET.SubElement(price, f"{{{RAM}}}ChargeAmount").text = f"{item.get('unit_price', 0):.2f}"
+            delv_li = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeDelivery")
+            ET.SubElement(
+                delv_li, f"{{{RAM}}}BilledQuantity",
+                unitCode=item.get("unit_code", "C62")
+            ).text = f"{item.get('quantity', 0):.2f}"
+            sett_li = ET.SubElement(li, f"{{{RAM}}}SpecifiedLineTradeSettlement")
+            ltax    = ET.SubElement(sett_li, f"{{{RAM}}}ApplicableTradeTax")
+            tr      = float(invoice_data.get("tax_rate", 19))
             ET.SubElement(ltax, f"{{{RAM}}}TypeCode").text              = "VAT"
             ET.SubElement(ltax, f"{{{RAM}}}CategoryCode").text          = "S" if tr > 0 else "Z"
             ET.SubElement(ltax, f"{{{RAM}}}RateApplicablePercent").text = str(tr)
-            mon = ET.SubElement(sett, f"{{{RAM}}}SpecifiedTradeSettlementLineMonetarySummation")
-            ET.SubElement(mon, f"{{{RAM}}}LineTotalAmount").text = f"{item.get('total_price',0):.2f}"
+            mon = ET.SubElement(sett_li, f"{{{RAM}}}SpecifiedTradeSettlementLineMonetarySummation")
+            ET.SubElement(mon, f"{{{RAM}}}LineTotalAmount").text = f"{item.get('total_price', 0):.2f}"
+
         agr = ET.SubElement(txn, f"{{{RAM}}}ApplicableHeaderTradeAgreement")
-        leitweg = receiver_data.get("leitweg_id","").strip()
-        br_val  = leitweg if leitweg else invoice_data.get("buyer_reference","")
-        if br_val: ET.SubElement(agr, f"{{{RAM}}}BuyerReference").text = br_val
+
+        leitweg = receiver_data.get("leitweg_id", "").strip()
+        br_val  = leitweg or invoice_data.get("buyer_reference", "") or "n/a"
+        ET.SubElement(agr, f"{{{RAM}}}BuyerReference").text = br_val
+
         if invoice_data.get("purchase_order_number"):
             po = ET.SubElement(agr, f"{{{RAM}}}BuyerOrderReferencedDocument")
             ET.SubElement(po, f"{{{RAM}}}IssuerAssignedID").text = invoice_data["purchase_order_number"]
-        cr_val = receiver_data.get("contract_ref") or invoice_data.get("contract_ref","")
-        if cr_val and str(cr_val).strip():
-            cd = ET.SubElement(agr, f"{{{RAM}}}ContractReferencedDocument")
-            ET.SubElement(cd, f"{{{RAM}}}IssuerAssignedID").text = str(cr_val)
+
+        # ContractReferencedDocument ist im ZUGFeRD Basic-Profil NICHT erlaubt (nur EXTENDED).
+        # Vertragsnummer wird daher nur im PDF-Text ausgegeben, nicht im XML.
+
         seller = ET.SubElement(agr, f"{{{RAM}}}SellerTradeParty")
-        ET.SubElement(seller, f"{{{RAM}}}Name").text = sender_data.get("company_name","")
+        # Korrekte Reihenfolge laut EN 16931 XSD:
+        # ID → Name → SpecifiedLegalOrganization → DefinedTradeContact → PostalTradeAddress → ...
+        tid_raw = sender_data.get("tax_id", "").replace(" ", "").upper()
+        ET.SubElement(seller, f"{{{RAM}}}Name").text = sender_data.get("company_name", "")
+        legal_org = ET.SubElement(seller, f"{{{RAM}}}SpecifiedLegalOrganization")
+        ET.SubElement(legal_org, f"{{{RAM}}}ID", schemeID="0002").text = (
+            tid_raw or sender_data.get("company_name", "n/a")
+        )
+
         if any([sender_data.get("contact_person"), sender_data.get("phone"), sender_data.get("email")]):
             sc = ET.SubElement(seller, f"{{{RAM}}}DefinedTradeContact")
-            if sender_data.get("contact_person"): ET.SubElement(sc, f"{{{RAM}}}PersonName").text = sender_data["contact_person"]
+            if sender_data.get("contact_person"):
+                ET.SubElement(sc, f"{{{RAM}}}PersonName").text = sender_data["contact_person"]
             if sender_data.get("phone"):
                 ph = ET.SubElement(sc, f"{{{RAM}}}TelephoneUniversalCommunication")
                 ET.SubElement(ph, f"{{{RAM}}}CompleteNumber").text = sender_data["phone"]
             if sender_data.get("email"):
                 em = ET.SubElement(sc, f"{{{RAM}}}EmailURIUniversalCommunication")
                 ET.SubElement(em, f"{{{RAM}}}URIID").text = sender_data["email"]
-        sa = ET.SubElement(seller, f"{{{RAM}}}PostalTradeAddress")
-        parts = sender_data.get("address","").split("\n")
+
+        sa    = ET.SubElement(seller, f"{{{RAM}}}PostalTradeAddress")
+        parts = sender_data.get("address", "").split("\n")
         if len(parts) >= 2:
             ET.SubElement(sa, f"{{{RAM}}}LineOne").text = parts[0].strip()
             pc = parts[-1].strip().split(" ", 1)
@@ -1584,15 +1571,27 @@ class PDFGenerator(FPDF):
                 ET.SubElement(sa, f"{{{RAM}}}PostcodeCode").text = pc[0]
                 ET.SubElement(sa, f"{{{RAM}}}CityName").text     = pc[1]
         ET.SubElement(sa, f"{{{RAM}}}CountryID").text = "DE"
-        tid = sender_data.get("tax_id","").replace(" ","").upper()
-        if tid:
+
+        trate_check = float(invoice_data.get("tax_rate", 19))
+        if trate_check > 0:
             st = ET.SubElement(seller, f"{{{RAM}}}SpecifiedTaxRegistration")
-            ET.SubElement(st, f"{{{RAM}}}ID", schemeID="VA" if tid.startswith("DE") else "FC").text = tid
+            if tid_raw:
+                scheme = "VA" if tid_raw.startswith("DE") else "FC"
+                ET.SubElement(st, f"{{{RAM}}}ID", schemeID=scheme).text = tid_raw
+            else:
+                ET.SubElement(st, f"{{{RAM}}}ID", schemeID="FC").text = "UNBEKANNT"
+        elif tid_raw:
+            st = ET.SubElement(seller, f"{{{RAM}}}SpecifiedTaxRegistration")
+            scheme = "VA" if tid_raw.startswith("DE") else "FC"
+            ET.SubElement(st, f"{{{RAM}}}ID", schemeID=scheme).text = tid_raw
+
         buyer = ET.SubElement(agr, f"{{{RAM}}}BuyerTradeParty")
-        ET.SubElement(buyer, f"{{{RAM}}}Name").text = receiver_data.get("customer_name","")
-        if receiver_data.get("customer_number"): ET.SubElement(buyer, f"{{{RAM}}}ID").text = receiver_data["customer_number"]
+        # Korrekte Reihenfolge laut EN 16931 XSD: ID → Name → PostalTradeAddress → ...
+        if receiver_data.get("customer_number"):
+            ET.SubElement(buyer, f"{{{RAM}}}ID").text = receiver_data["customer_number"]
+        ET.SubElement(buyer, f"{{{RAM}}}Name").text = receiver_data.get("customer_name", "")
         ba = ET.SubElement(buyer, f"{{{RAM}}}PostalTradeAddress")
-        bp = receiver_data.get("customer_address","").split("\n")
+        bp = receiver_data.get("customer_address", "").split("\n")
         if len(bp) >= 2:
             ET.SubElement(ba, f"{{{RAM}}}LineOne").text = bp[0].strip()
             bpc = bp[-1].strip().split(" ", 1)
@@ -1600,58 +1599,172 @@ class PDFGenerator(FPDF):
                 ET.SubElement(ba, f"{{{RAM}}}PostcodeCode").text = bpc[0]
                 ET.SubElement(ba, f"{{{RAM}}}CityName").text     = bpc[1]
         ET.SubElement(ba, f"{{{RAM}}}CountryID").text = "DE"
-        bvat = receiver_data.get("customer_vat","").replace(" ","").upper()
+        bvat = receiver_data.get("customer_vat", "").replace(" ", "").upper()
         if bvat:
             bt = ET.SubElement(buyer, f"{{{RAM}}}SpecifiedTaxRegistration")
             ET.SubElement(bt, f"{{{RAM}}}ID", schemeID="VA").text = bvat
+
         delv  = ET.SubElement(txn, f"{{{RAM}}}ApplicableHeaderTradeDelivery")
         event = ET.SubElement(delv, f"{{{RAM}}}ActualDeliverySupplyChainEvent")
         occ   = ET.SubElement(event, f"{{{RAM}}}OccurrenceDateTime")
         d_str = invoice_data.get("delivery_date") or invoice_data.get("invoice_date")
         d_dt  = datetime.strptime(d_str, "%d.%m.%Y")
         ET.SubElement(occ, f"{{{UDT}}}DateTimeString", format="102").text = d_dt.strftime("%Y%m%d")
+
         sett = ET.SubElement(txn, f"{{{RAM}}}ApplicableHeaderTradeSettlement")
-        if sender_data.get("creditor_reference"): ET.SubElement(sett, f"{{{RAM}}}CreditorReferenceID").text = sender_data["creditor_reference"]
+        if sender_data.get("creditor_reference"):
+            ET.SubElement(sett, f"{{{RAM}}}CreditorReferenceID").text = sender_data["creditor_reference"]
         ET.SubElement(sett, f"{{{RAM}}}InvoiceCurrencyCode").text = "EUR"
-        pm  = ET.SubElement(sett, f"{{{RAM}}}SpecifiedTradeSettlementPaymentMeans")
-        ET.SubElement(pm, f"{{{RAM}}}TypeCode").text = "58"
-        acc = ET.SubElement(pm, f"{{{RAM}}}PayeePartyCreditorFinancialAccount")
-        ET.SubElement(acc, f"{{{RAM}}}IBANID").text = sender_data.get("bank_account","").replace(" ","")
-        if sender_data.get("bank_bic"):
-            fi = ET.SubElement(pm, f"{{{RAM}}}PayeeSpecifiedCreditorFinancialInstitution")
-            ET.SubElement(fi, f"{{{RAM}}}BICID").text = sender_data["bank_bic"].replace(" ","")
+
+        iban = sender_data.get("bank_account", "").replace(" ", "")
+        if iban:
+            pm  = ET.SubElement(sett, f"{{{RAM}}}SpecifiedTradeSettlementPaymentMeans")
+            ET.SubElement(pm, f"{{{RAM}}}TypeCode").text = "58"
+            acc = ET.SubElement(pm, f"{{{RAM}}}PayeePartyCreditorFinancialAccount")
+            ET.SubElement(acc, f"{{{RAM}}}IBANID").text = iban
+            if sender_data.get("bank_bic"):
+                fi = ET.SubElement(pm, f"{{{RAM}}}PayeeSpecifiedCreditorFinancialInstitution")
+                ET.SubElement(fi, f"{{{RAM}}}BICID").text = sender_data["bank_bic"].replace(" ", "")
+
         htax  = ET.SubElement(sett, f"{{{RAM}}}ApplicableTradeTax")
         trate = float(invoice_data.get("tax_rate", 19))
-        ET.SubElement(htax, f"{{{RAM}}}CalculatedAmount").text     = f"{invoice_data.get('tax_amount',0):.2f}"
+        ET.SubElement(htax, f"{{{RAM}}}CalculatedAmount").text     = f"{invoice_data.get('tax_amount', 0):.2f}"
         ET.SubElement(htax, f"{{{RAM}}}TypeCode").text              = "VAT"
-        ET.SubElement(htax, f"{{{RAM}}}BasisAmount").text           = f"{invoice_data.get('subtotal',0):.2f}"
+        ET.SubElement(htax, f"{{{RAM}}}BasisAmount").text           = f"{invoice_data.get('subtotal', 0):.2f}"
         ET.SubElement(htax, f"{{{RAM}}}CategoryCode").text          = "S" if trate > 0 else "Z"
         ET.SubElement(htax, f"{{{RAM}}}RateApplicablePercent").text = str(trate)
+
         pt = ET.SubElement(sett, f"{{{RAM}}}SpecifiedTradePaymentTerms")
-        ET.SubElement(pt, f"{{{RAM}}}Description").text = invoice_data.get("payment_terms", "Zahlbar sofort ohne Abzug.")
+        ET.SubElement(pt, f"{{{RAM}}}Description").text = invoice_data.get(
+            "payment_terms", "Zahlbar sofort ohne Abzug.")
         if invoice_data.get("due_date"):
             dd = datetime.strptime(invoice_data["due_date"], "%d.%m.%Y")
             de = ET.SubElement(pt, f"{{{RAM}}}DueDateDateTime")
             ET.SubElement(de, f"{{{UDT}}}DateTimeString", format="102").text = dd.strftime("%Y%m%d")
+
+        subtotal        = float(invoice_data.get('subtotal', 0))
+        tax_amount      = float(invoice_data.get('tax_amount', 0))
+        total           = float(invoice_data.get('total', 0))
+        prepaid         = float(invoice_data.get('prepaid_amount', 0))
+        allowance_total = float(invoice_data.get('discount_amount', 0))
+        due_payable     = total - prepaid
+
         summ = ET.SubElement(sett, f"{{{RAM}}}SpecifiedTradeSettlementHeaderMonetarySummation")
-        ET.SubElement(summ, f"{{{RAM}}}LineTotalAmount").text      = f"{invoice_data.get('subtotal',0):.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}LineTotalAmount").text      = f"{subtotal:.2f}"
         ET.SubElement(summ, f"{{{RAM}}}ChargeTotalAmount").text    = "0.00"
-        ET.SubElement(summ, f"{{{RAM}}}AllowanceTotalAmount").text = f"{invoice_data.get('discount_amount',0):.2f}"
-        ET.SubElement(summ, f"{{{RAM}}}TaxBasisTotalAmount").text  = f"{invoice_data.get('subtotal',0):.2f}"
-        ET.SubElement(summ, f"{{{RAM}}}TaxTotalAmount", currencyID="EUR").text = f"{invoice_data.get('tax_amount',0):.2f}"
-        ET.SubElement(summ, f"{{{RAM}}}GrandTotalAmount").text     = f"{invoice_data.get('total',0):.2f}"
-        ET.SubElement(summ, f"{{{RAM}}}TotalPrepaidAmount").text   = "0.00"
-        ET.SubElement(summ, f"{{{RAM}}}DuePayableAmount").text     = f"{invoice_data.get('total',0):.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}AllowanceTotalAmount").text = f"{allowance_total:.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}TaxBasisTotalAmount").text  = f"{subtotal:.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}TaxTotalAmount", currencyID="EUR").text = f"{tax_amount:.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}GrandTotalAmount").text     = f"{total:.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}TotalPrepaidAmount").text   = f"{prepaid:.2f}"
+        ET.SubElement(summ, f"{{{RAM}}}DuePayableAmount").text     = f"{due_payable:.2f}"
+
         return ET.tostring(root, encoding='utf-8', xml_declaration=True)
 
-    def _embed_xml(self, pdf_bytes, xml_bytes):
+    # ── PDF/A-3b konforme Einbettung ──────────────────────────────────────────
+    def _embed_xml(self, pdf_bytes: bytes, xml_bytes: bytes, invoice_data: dict) -> bytes:
+        if isinstance(pdf_bytes, str):
+            pdf_bytes = pdf_bytes.encode('latin-1')
+
         reader = PdfReader(io.BytesIO(pdf_bytes))
         writer = PdfWriter()
-        for page in reader.pages: writer.add_page(page)
-        writer.add_attachment("factur-x.xml", xml_bytes)
-        writer.add_metadata({'/Title':'ZUGFeRD Rechnung','/Creator':'FRechnung','/Subject':'Factur-X/ZUGFeRD 2.2 Basic'})
-        out = io.BytesIO(); writer.write(out); return out.getvalue()
+        for page in reader.pages:
+            writer.add_page(page)
 
+        writer.add_attachment("factur-x.xml", xml_bytes)
+
+        ef_ref = None
+        try:
+            catalog  = writer._root_object
+            names_ob = catalog.get("/Names")
+            if names_ob:
+                names_ob = names_ob.get_object()
+                ef_ob = names_ob.get("/EmbeddedFiles")
+                if ef_ob:
+                    ef_ob = ef_ob.get_object()
+                    ef_names = ef_ob.get("/Names")
+                    if ef_names:
+                        ef_names = ef_names.get_object()
+                        for k in range(1, len(ef_names), 2):
+                            fs_ref = ef_names[k]
+                            fs = fs_ref.get_object()
+                            if isinstance(fs, DictionaryObject):
+                                fs[NameObject("/AFRelationship")] = NameObject("/Alternative")
+                                ef_ref = fs_ref
+        except Exception:
+            pass
+
+        if ef_ref is not None:
+            try:
+                af_array = ArrayObject([ef_ref])
+                writer._root_object[NameObject("/AF")] = af_array
+            except Exception:
+                pass
+
+        xmp_bytes_data = _build_xmp(
+            invoice_data.get("invoice_number", ""),
+            invoice_data.get("invoice_date",   "")
+        )
+        xmp_stream = DecodedStreamObject()
+        xmp_stream.set_data(xmp_bytes_data)
+        xmp_stream.update({
+            NameObject("/Type"):    NameObject("/Metadata"),
+            NameObject("/Subtype"): NameObject("/XML"),
+        })
+        xmp_ref = writer._add_object(xmp_stream)
+        writer._root_object[NameObject("/Metadata")] = xmp_ref
+
+        mark_info = DictionaryObject({
+            NameObject("/Marked"): BooleanObject(True),
+        })
+        writer._root_object[NameObject("/MarkInfo")] = mark_info
+
+        icc_stream = DecodedStreamObject()
+        icc_stream.set_data(b"")
+        icc_stream.update({
+            NameObject("/N"): NumberObject(3),
+        })
+        icc_ref = writer._add_object(icc_stream)
+
+        output_intent = DictionaryObject({
+            NameObject("/Type"):             NameObject("/OutputIntent"),
+            NameObject("/S"):                NameObject("/GTS_PDFA1"),
+            NameObject("/OutputConditionIdentifier"): ByteStringObject(b"sRGB"),
+            NameObject("/RegistryName"):     ByteStringObject(b"http://www.color.org"),
+            NameObject("/Info"):             ByteStringObject(b"sRGB IEC61966-2.1"),
+            NameObject("/DestOutputProfile"): icc_ref,
+        })
+        oi_ref = writer._add_object(output_intent)
+        writer._root_object[NameObject("/OutputIntents")] = ArrayObject([oi_ref])
+
+        viewer_prefs = DictionaryObject({
+            NameObject("/DisplayDocTitle"): BooleanObject(True),
+        })
+        writer._root_object[NameObject("/ViewerPreferences")] = viewer_prefs
+
+        writer.add_metadata({
+            '/Title':        f'ZUGFeRD Rechnung {invoice_data.get("invoice_number", "")}',
+            '/Creator':      'FRechnung v1.2.0',
+            '/Producer':     'FRechnung v1.2.0 / pypdf',
+            '/Subject':      'ZUGFeRD 2.3.3 Basic',
+            '/CreationDate': datetime.utcnow().strftime("D:%Y%m%d%H%M%S+00'00'"),
+            '/ModDate':      datetime.utcnow().strftime("D:%Y%m%d%H%M%S+00'00'"),
+        })
+
+        out = io.BytesIO()
+        writer.write(out)
+        pdf_out = out.getvalue()
+
+        for old in [b'%PDF-1.3', b'%PDF-1.4', b'%PDF-1.5', b'%PDF-1.6']:
+            pdf_out = pdf_out.replace(old, b'%PDF-1.7', 1)
+
+        binary_comment = b'\x25\xe2\xe3\xcf\xd3\n'
+        pdf_out = pdf_out.replace(b'%PDF-1.7\n', b'%PDF-1.7\n' + binary_comment, 1)
+
+        return pdf_out
+
+
+# ── Öffentliche API ───────────────────────────────────────────────────────────
 
 def create_invoice_pdf(invoice_data, receiver_data, items, sender_data,
                        logo_path="", theme_name="Klassisch Blau"):
